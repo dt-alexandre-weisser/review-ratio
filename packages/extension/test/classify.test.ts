@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { PUBLISHED_CLASSES } from '@review-ratio/server';
-import { createClassifier, linesByClass } from '../src/lib/classify.ts';
+import { ClassificationBudgetError, createClassifier, linesByClass } from '../src/lib/classify.ts';
 
 const classify = createClassifier(
   PUBLISHED_CLASSES.map((c) => ({ name: c.name, globs: [...c.globs] })),
@@ -102,5 +102,37 @@ describe('linesByClass', () => {
         classify,
       ),
     ).toEqual({ production: 15, test: 7 });
+  });
+});
+
+describe('classification budget', () => {
+  it('stops a refresh whose globs take too long, and caches each path', () => {
+    let clock = 0;
+    let calls = 0;
+    const classify = createClassifier([{ name: 'docs', globs: ['**/*.md', '**/*.txt'] }], {
+      budgetMs: 10,
+      now: () => {
+        calls += 1;
+        clock += 3;
+        return clock;
+      },
+    });
+    expect(classify('a.ts')).toBe('production');
+    const callsAfterFirst = calls;
+    expect(classify('a.ts')).toBe('production');
+    expect(calls).toBe(callsAfterFirst);
+    expect(() => {
+      for (let i = 0; i < 10; i += 1) classify(`f${i}.ts`);
+    }).toThrow(ClassificationBudgetError);
+  });
+
+  it('classifies a thousand paths quickly with the published globs, even instrumented', () => {
+    const paths = Array.from(
+      { length: 1000 },
+      (_, i) => `packages/p${i % 50}/src/module${i}/file${i}.ts`,
+    );
+    const started = performance.now();
+    for (const path of paths) classify(path);
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 });

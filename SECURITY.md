@@ -38,10 +38,10 @@ Every install has the same extension id (the manifest pins a public key), so the
 a request says nothing about the machine or the user. Records are sorted by time, so their order
 does not reveal which reviews belong to the same PR.
 
-The server's class globs are bounded (count, length, and the number of wildcards per glob) and
-matched without extended patterns. Wildcards compile to backtracking regular expressions; within
-these bounds the worst match measured takes about 10 ms, so a misbehaving server cannot make
-classification hang the browser.
+The server's class globs are bounded (count, length, brace alternatives, segments) and matched by
+the extension's own glob matcher, without regular expressions, so they cannot backtrack
+exponentially. A refresh also stops after 5 seconds of classification, so a misbehaving server
+cannot make the browser hang.
 
 ## What the server keeps
 

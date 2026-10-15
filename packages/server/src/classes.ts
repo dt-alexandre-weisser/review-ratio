@@ -7,8 +7,11 @@ import type { FileClass } from '@review-ratio/contract';
  * first hit; a path that matches nothing is `production`. Weights live in `formula.ts` and are
  * never published.
  *
- * Globs are picomatch patterns matched case-sensitively with `dot: true` against the
- * repository-relative path. Case-sensitive on purpose: `*Test.*` must not match `latest.ts`.
+ * Globs use picomatch syntax with `{ dot: true }`, case-sensitive, against the repository-relative
+ * path; case-sensitive on purpose, so `*Test.*` never matches `latest.ts`. The extension matches
+ * them with its own matcher, which supports `*`, `?`, `**`, `[...]`, `{a,b}` and `\` escapes only:
+ * do not publish extglobs or ranges such as `{1..9}`. Its bounds (packages/extension/src/lib/
+ * server-client.ts) cap the number, length and brace expansion of the globs.
  */
 export interface PublishedClass {
   name: FileClass;

@@ -10,6 +10,7 @@ import type {
   GitHubClient,
   PullRequestDetails,
   PullRequestFile,
+  ReadyPeriod,
   Review,
   ReviewComment,
   ReviewSummary,
@@ -217,7 +218,7 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
         baseRefOid: raw.baseRefOid,
         forkOid: raw.commits.nodes[0]?.commit.parents.nodes[0]?.oid ?? null,
         readyForReviewAt: raw.timelineItems.nodes.find((n) => n?.createdAt)?.createdAt ?? null,
-        firstReadyAt: firstReadyAt(raw),
+        readyPeriods: readyPeriodsOf(raw.createdAt, raw.isDraft, stateEventsOf(raw)),
         files: files.map(toFile),
         reviews: raw.reviews.nodes.map(toSummary),
         myReviews: myReviews.map(toReview),
@@ -306,7 +307,7 @@ interface RawPullRequest {
   author: RawActor | null;
   assignees: { nodes: { login: string }[] };
   timelineItems: { nodes: ({ createdAt?: string } | null)[] };
-  firstStateEvent: { nodes: ({ __typename: string; createdAt?: string } | null)[] };
+  stateEvents: { nodes: ({ __typename: string; createdAt?: string } | null)[] } | null;
   commits: { nodes: { commit: { parents: { nodes: { oid: string }[] } } }[] };
   files: Connection<RawFile>;
   reviews: { nodes: RawReviewSummary[] };
@@ -328,14 +329,42 @@ function toActor(raw: RawActor | null): Actor | null {
 }
 
 /**
- * When the PR first became ready, from its first draft-or-ready event: a ready-for-review event
- * first means it was opened as a draft; a convert-to-draft event first means it was opened ready.
+ * The periods a PR was ready for review, from its draft and ready events. Opened as a draft
+ * when its first such event marks it ready; opened ready when that event converts it to a draft,
+ * or when it has none and is not a draft now.
  */
-function firstReadyAt(raw: RawPullRequest): string | null {
-  const first = raw.firstStateEvent.nodes[0];
-  if (first?.__typename === 'ReadyForReviewEvent') return first.createdAt ?? null;
-  if (first?.__typename === 'ConvertToDraftEvent') return raw.createdAt;
-  return raw.isDraft ? null : raw.createdAt;
+export function readyPeriodsOf(
+  createdAt: string,
+  isDraft: boolean,
+  events: readonly { type: 'ready' | 'draft'; at: string }[],
+): ReadyPeriod[] {
+  const sorted = [...events].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const openedReady = sorted.length === 0 ? !isDraft : sorted[0]?.type === 'draft';
+  const periods: ReadyPeriod[] = [];
+  let openSince: string | null = openedReady ? createdAt : null;
+  for (const event of sorted) {
+    if (event.type === 'draft' && openSince !== null) {
+      periods.push({ from: openSince, to: event.at });
+      openSince = null;
+    } else if (event.type === 'ready' && openSince === null) {
+      openSince = event.at;
+    }
+  }
+  if (openSince !== null) periods.push({ from: openSince, to: null });
+  return periods;
+}
+
+function stateEventsOf(raw: RawPullRequest): { type: 'ready' | 'draft'; at: string }[] {
+  const events: { type: 'ready' | 'draft'; at: string }[] = [];
+  // GraphQL may null a connection that failed; no events then.
+  for (const node of raw.stateEvents?.nodes ?? []) {
+    if (!node?.createdAt) continue;
+    if (node.__typename === 'ReadyForReviewEvent')
+      events.push({ type: 'ready', at: node.createdAt });
+    if (node.__typename === 'ConvertToDraftEvent')
+      events.push({ type: 'draft', at: node.createdAt });
+  }
+  return events;
 }
 
 function toFile(raw: RawFile): PullRequestFile {
@@ -389,7 +418,7 @@ export const PR_QUERY = `query PullRequest($owner: String!, $name: String!, $num
       author { login __typename }
       assignees(first: 25) { nodes { login } }
       timelineItems(itemTypes: [READY_FOR_REVIEW_EVENT], last: 1) { nodes { ... on ReadyForReviewEvent { createdAt } } }
-      firstStateEvent: timelineItems(itemTypes: [READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT], first: 1) {
+      stateEvents: timelineItems(itemTypes: [READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT], first: 50) {
         nodes { __typename ... on ReadyForReviewEvent { createdAt } ... on ConvertToDraftEvent { createdAt } }
       }
       commits(first: 1) { nodes { commit { parents(first: 1) { nodes { oid } } } } }

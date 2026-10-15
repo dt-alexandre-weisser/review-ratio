@@ -11,14 +11,14 @@
   },
   "dependencies": {
     "@review-ratio/contract": "workspace:*",
-    "arktype": "^2.2.8",
-    "picomatch": "^4.0.7"
+    "arktype": "^2.2.8"
   },
   "devDependencies": {
     "@review-ratio/server": "workspace:*",
     "@types/chrome": "^0.3.5",
     "@types/picomatch": "^4.0.3",
     "esbuild": "^0.28.2",
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "picomatch": "^4.0.7"
   }
 }

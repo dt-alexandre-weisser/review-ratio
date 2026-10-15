@@ -16,8 +16,9 @@
  * - The Viewed bonus covers the files of the credited range that I marked Viewed, from a
  *   snapshot taken while that commit was still the PR head.
  * - `waitedHoursWithoutReview` is set when my review is the first review by a human who does
- *   not own the PR since it first became ready for review. A PR that never was ready was not
- *   waiting; reviews of the draft before that do not count.
+ *   not own the PR since it first became ready for review. The wait counts the time the PR was
+ *   ready, not its draft periods. Reviews of the draft before it first became ready do not count,
+ *   and do not keep the credit of a commit from a review made once it was ready.
  */
 import type { LinesByClassV1, ReviewActionV1 } from '@review-ratio/contract';
 
@@ -151,8 +152,13 @@ interface Range {
   members: Set<string>;
 }
 
-/** Groups my real reviews by reviewed commit, in order, and picks the review credited for each. */
-function rangesOf(mine: readonly Mine[]): Range[] {
+/**
+ * Groups my real reviews by reviewed commit, in order, and picks the review credited for each:
+ * the strongest; among equals the earliest, except that a review made once the PR was ready
+ * takes the credit from one made of the draft.
+ */
+function rangesOf(mine: readonly Mine[], firstReadyMs: number | null): Range[] {
+  const ofDraft = (entry: Mine) => firstReadyMs === null || entry.tMs < firstReadyMs;
   const ranges = new Map<string, Range>();
   let previous: string | null = null;
   for (const entry of mine) {
@@ -169,24 +175,45 @@ function rangesOf(mine: readonly Mine[]): Range[] {
       previous = commit;
     } else {
       range.members.add(entry.review.id);
-      // Strictly stronger only: among equals the earliest keeps the credit and its age.
-      if (strength(entry.action) > strength(range.credited.action)) range.credited = entry;
+      const stronger = strength(entry.action) > strength(range.credited.action);
+      const equalButReady =
+        strength(entry.action) === strength(range.credited.action) &&
+        ofDraft(range.credited) &&
+        !ofDraft(entry);
+      // Among equals the earliest keeps the credit and its age: re-approving restarts no decay.
+      if (stronger || equalButReady) range.credited = entry;
     }
   }
   return [...ranges.values()];
+}
+
+function firstReadyMsOf(pr: PullRequestDetails): number | null {
+  const first = pr.readyPeriods[0];
+  return first ? parseIso(first.from) : null;
+}
+
+/** Hours the PR spent ready for review before `untilMs`. */
+export function readyHoursBefore(pr: PullRequestDetails, untilMs: number): number {
+  let ms = 0;
+  for (const period of pr.readyPeriods) {
+    const from = parseIso(period.from);
+    const to = Math.min(period.to === null ? untilMs : parseIso(period.to), untilMs);
+    if (to > from) ms += to - from;
+  }
+  return hoursBetween(0, ms);
 }
 
 /** The first review since the PR first became ready, and how long the PR waited for it. */
 function rescueOf(
   pr: PullRequestDetails,
 ): { id: string; atMs: number; waitedHours: number } | null {
-  if (pr.firstReadyAt === null) return null;
-  const readyMs = parseIso(pr.firstReadyAt);
+  const readyMs = firstReadyMsOf(pr);
+  if (readyMs === null) return null;
   const id = firstReviewId(pr.reviews, ownersOf(pr), readyMs);
   const at = pr.reviews.find((r) => r.id === id)?.submittedAt;
   if (id === null || !at) return null;
   const atMs = parseIso(at);
-  return { id, atMs, waitedHours: Math.max(0, hoursBetween(readyMs, atMs)) };
+  return { id, atMs, waitedHours: readyHoursBefore(pr, atMs) };
 }
 
 export async function upRecordsForPullRequest(
@@ -206,7 +233,7 @@ export async function upRecordsForPullRequest(
   if (mine.length === 0) return [];
 
   const windowStart = ctx.nowMs - WINDOW_MS;
-  const allRanges = rangesOf(mine);
+  const allRanges = rangesOf(mine, firstReadyMsOf(pr));
   const ranges = allRanges.filter((r) => r.credited.tMs >= windowStart);
   const coveredByReview = new Map<string, FileLines>(
     await Promise.all(

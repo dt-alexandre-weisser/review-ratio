@@ -74,12 +74,13 @@ export function pr(overrides: Partial<PullRequestDetails> = {}): PullRequestDeta
     files: [{ path: 'src/app.ts', additions: 300, deletions: 100, viewerViewedState: 'UNVIEWED' }],
     ...overrides,
     // Opened ready by default; opened as a draft, it became ready at its ready event, if any.
-    firstReadyAt:
-      overrides.firstReadyAt !== undefined
-        ? overrides.firstReadyAt
-        : overrides.isDraft === true
-          ? (overrides.readyForReviewAt ?? null)
-          : (overrides.readyForReviewAt ?? overrides.createdAt ?? hoursAgo(10)),
+    readyPeriods:
+      overrides.readyPeriods ??
+      (overrides.isDraft === true
+        ? overrides.readyForReviewAt
+          ? [{ from: overrides.readyForReviewAt, to: null }]
+          : []
+        : [{ from: overrides.readyForReviewAt ?? overrides.createdAt ?? hoursAgo(10), to: null }]),
     reviews:
       overrides.reviews ??
       myReviews.map(({ id, author, state, submittedAt }) => ({ id, author, state, submittedAt })),

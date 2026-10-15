@@ -9,6 +9,7 @@ import {
   type ScoreResponseV1,
 } from '@review-ratio/contract';
 
+import { GlobError, compileGlob, type CompiledPattern } from './glob.ts';
 import type { PublishedClass } from './storage.ts';
 
 export class ServerError extends Error {
@@ -41,6 +42,10 @@ const REQUEST_TIMEOUT_MS = 15_000;
 /** Bounds on the published globs: the server must not be able to make classification costly. */
 export const MAX_GLOBS = 1_000;
 export const MAX_GLOB_LENGTH = 200;
+/** Brace alternatives over all globs. */
+export const MAX_PATTERNS = 2_000;
+/** Path segments per pattern. */
+export const MAX_SEGMENTS = 32;
 
 /** Why a classes response cannot be used, or `null`. */
 export function classesProblem(
@@ -52,26 +57,21 @@ export function classesProblem(
   if (globs.some((g) => g.length === 0 || g.length > MAX_GLOB_LENGTH)) {
     return `a glob is empty or longer than ${MAX_GLOB_LENGTH} characters`;
   }
-  if (globs.some((g) => !isBoundedGlob(g))) {
-    return `a glob has more than ${MAX_STARS} *, ${MAX_GLOBSTARS} ** or ${MAX_BRACES} {} groups`;
+  let patterns = 0;
+  for (const glob of globs) {
+    let compiled: CompiledPattern[];
+    try {
+      compiled = compileGlob(glob);
+    } catch (error) {
+      return error instanceof GlobError ? `${glob}: ${error.message}` : 'a glob cannot be read';
+    }
+    if (compiled.some((pattern) => pattern.length > MAX_SEGMENTS)) {
+      return `a glob has more than ${MAX_SEGMENTS} path segments`;
+    }
+    patterns += compiled.length;
+    if (patterns > MAX_PATTERNS) return `more than ${MAX_PATTERNS} patterns after brace expansion`;
   }
   return null;
-}
-
-/**
- * Wildcards compile to lazy regular-expression loops that backtrack against each other: a few
- * `*` in one glob can take seconds, then minutes, on a long path. Within these bounds, which the
- * published globs fit, the worst case measured stays around 10 ms.
- */
-export const MAX_STARS = 2;
-export const MAX_GLOBSTARS = 3;
-export const MAX_BRACES = 2;
-
-export function isBoundedGlob(glob: string): boolean {
-  const globstars = glob.match(/\*\*/g)?.length ?? 0;
-  const stars = glob.replace(/\*\*/g, '').match(/\*/g)?.length ?? 0;
-  const braces = glob.match(/\{/g)?.length ?? 0;
-  return stars <= MAX_STARS && globstars <= MAX_GLOBSTARS && braces <= MAX_BRACES;
 }
 
 export function createServerClient(baseUrl: string, fetchImpl: Fetch = fetch): ServerClient {

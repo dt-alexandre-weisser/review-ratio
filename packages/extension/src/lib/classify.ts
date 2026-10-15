@@ -2,33 +2,64 @@
  * Local file classification against the server's published globs. Only the class name and a line
  * count ever leave the browser; the path is matched here and forgotten.
  */
-import picomatch from 'picomatch';
-
 import type { FileClass, LinesByClassV1 } from '@review-ratio/contract';
 
+import { compileGlob, matchPattern, splitPath } from './glob.ts';
 import type { PublishedClass } from './storage.ts';
 
 export type Classifier = (path: string) => FileClass;
 
-/**
- * Case-sensitive like Git paths, so `*Test.*` never matches `latest.ts`. `windows: false`: GitHub
- * paths always use `/`, whatever OS the browser runs on. `noextglob`: the published globs need no
- * extended patterns, which are the ones that can compile to slow regular expressions.
- */
-const MATCH_OPTIONS: picomatch.PicomatchOptions = { dot: true, windows: false, noextglob: true };
+/** A refresh spends at most this much time classifying paths, whatever globs the server sent. */
+export const CLASSIFICATION_BUDGET_MS = 5_000;
 
-/** Builds a classifier: first matching class wins, `production` when nothing matches. */
-export function createClassifier(classes: readonly PublishedClass[]): Classifier {
-  const matchers = classes.map((cls) => ({
+export class ClassificationBudgetError extends Error {
+  constructor() {
+    super("classifying files took too long: the server's class globs are too expensive");
+    this.name = 'ClassificationBudgetError';
+  }
+}
+
+export interface ClassifierOptions {
+  budgetMs?: number;
+  now?: () => number;
+}
+
+/**
+ * Builds a classifier: first matching class wins, `production` when nothing matches. Matching is
+ * case-sensitive like Git (`*Test.*` never matches `latest.ts`) and uses no regular expressions
+ * (see glob.ts). Each path is classified once per classifier, and the total time is bounded.
+ */
+export function createClassifier(
+  classes: readonly PublishedClass[],
+  options: ClassifierOptions = {},
+): Classifier {
+  const budgetMs = options.budgetMs ?? CLASSIFICATION_BUDGET_MS;
+  const now = options.now ?? (() => performance.now());
+  const compiled = classes.map((cls) => ({
     name: cls.name,
-    isMatch: picomatch(cls.globs, MATCH_OPTIONS),
+    patterns: cls.globs.flatMap((glob) => compileGlob(glob)),
   }));
+  const cache = new Map<string, FileClass>();
+  let spent = 0;
+
   return (path) => {
-    const normalized = path.replace(/^\.?\//, '');
-    for (const m of matchers) {
-      if (m.isMatch(normalized)) return m.name;
+    const cached = cache.get(path);
+    if (cached) return cached;
+    const started = now();
+    const parts = splitPath(path);
+    let result: FileClass = 'production';
+    search: for (const cls of compiled) {
+      for (const pattern of cls.patterns) {
+        if (matchPattern(pattern, parts)) {
+          result = cls.name;
+          break search;
+        }
+        if (spent + now() - started > budgetMs) throw new ClassificationBudgetError();
+      }
     }
-    return 'production';
+    spent += now() - started;
+    cache.set(path, result);
+    return result;
   };
 }
 

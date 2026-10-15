@@ -57,7 +57,12 @@ export async function refresh(deps: RefreshDeps): Promise<BadgeCache> {
   await store.migrate();
   const settings = await store.getSettings();
   if (!settings.token) {
-    return store.updateBadge({ status: 'no_token', error: null, refreshStartedAt: null });
+    return store.updateBadge({
+      status: 'no_token',
+      error: null,
+      refreshStartedAt: null,
+      unfinishedRefreshes: 0,
+    });
   }
 
   const startedAt = deps.now();

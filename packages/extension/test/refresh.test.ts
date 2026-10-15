@@ -105,8 +105,9 @@ describe('refresh', () => {
   });
 
   it('does nothing but flag the badge without a token', async () => {
-    const { deps, srv } = await setup({ token: '' });
-    expect((await refresh(deps)).status).toBe('no_token');
+    const { deps, srv, store } = await setup({ token: '' });
+    await store.updateBadge({ unfinishedRefreshes: 1 });
+    expect(await refresh(deps)).toMatchObject({ status: 'no_token', unfinishedRefreshes: 0 });
     expect(srv.scored).toHaveLength(0);
   });
 

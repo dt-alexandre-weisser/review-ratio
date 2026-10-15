@@ -52,7 +52,12 @@ point to tune; changing them never breaks the contract.
 
 - A path takes the first class whose globs match, in published order: `generated`, `ci`, `test`,
   `docs`, `chore`, `tooling`, `config`. A path that matches nothing is `production`.
-- Matching is case-sensitive, like Git, and always uses `/`.
+- Matching is case-sensitive, like Git, and always uses `/`. The extension matches with its own
+  glob matcher (`packages/extension/src/lib/glob.ts`), not regular expressions: compiled to
+  regular expressions, a crafted server glob backtracked for seconds per path. The matcher agrees
+  with picomatch (`{ dot: true }`) on every published glob and on 200,000 fuzzed cases; the one
+  known difference is a path segment literally named like a brace pattern, which picomatch also
+  matches as text. A refresh spends at most 5 seconds classifying, whatever the globs.
 - `scripts/`, `tools/` and `bin/` are tooling at the repository root or at the top of a monorepo
   package only: `src/agent/tools/` is production code.
 - `*Test.*` is a test only in languages that name tests that way (C#, Java, Kotlin…): `ABTest.tsx`
@@ -72,7 +77,8 @@ point to tune; changing them never breaks the contract.
   none of that counts as reviewed code.
 - Each reviewed commit is credited once, to my strongest review on it: an approval or a change
   request beats a comment review. Among equally strong reviews the earliest keeps the credit, so
-  approving the same commit again does not restart its decay. Commenting first and approving the
+  approving the same commit again does not restart its decay; but a review made once the PR was
+  ready takes the credit from an equally strong review of the draft. Commenting first and approving the
   same commit afterwards is worth the same as approving, rescue included. The weaker review keeps
   its commented lines.
 - A review whose commit GitHub no longer knows covers nothing: it cannot be placed in the PR's
@@ -113,14 +119,12 @@ question below.
 - A PR is mine when I authored it, or when it is a `github-actions` PR assigned to me. I earn no ↑
   on a PR that is mine, even when GitHub lets me approve it.
 - `waitedHoursWithoutReview` is non-zero only when my review is the first review by a human who
-  does not own the PR since it first became ready: at creation when it was opened ready, at its
-  first ready-for-review event when it was opened as a draft. Reviews of the draft before that do
-  not count, a PR that never was ready was not waiting, and converting a PR back to draft later
-  does not take an earned rescue away. The wait is measured from that first ready moment to the
-  first review, rounded up, so the server's "more than 48 hours" test is exact. When my first
-  review is a comment followed by an approval of the same commit, the rescue goes with the
-  covered lines to the approval; it stays on the first review when the credited review is an
-  earlier review of the draft.
+  does not own the PR since it first became ready. The wait counts only the time the PR spent
+  ready for review before that first review, from its draft and ready events: draft periods never
+  count, and converting a PR back to draft later does not take an earned rescue away. Reviews of
+  the draft before it first became ready do not count. The wait is rounded up, so the server's
+  "more than 48 hours" test is exact. The rescue goes with the covered lines of the commit the
+  first review was on, when that credited review is the first review or a later one.
 
 ### ↓ side
 
@@ -169,20 +173,20 @@ question below.
 
 ### Limits
 
-| Limit                               | Value                                                   | Why                                             |
-| ----------------------------------- | ------------------------------------------------------- | ----------------------------------------------- |
-| ↑ records per payload               | 500, newest kept                                        | A week of one person never needs more           |
-| ↓ records per payload               | 200, newest kept                                        |                                                 |
-| Lines per class per record          | 1,000,000, clamped                                      | One huge data file must not break the badge     |
-| Request body                        | 512 KiB                                                 | The largest valid payload fits                  |
-| Validation problems echoed          | 10                                                      | Keeps error answers small                       |
-| Keys per object, array items, depth | 32, 1,000, 8                                            | Rejected cheaply, before schema validation      |
-| Failed records validated            | 10                                                      | An invalid payload is rejected in milliseconds  |
-| Published globs                     | 1,000; each up to 200 characters, 2 `*`, 3 `**`, 2 `{}` | Matching stays around 10 ms, even on long paths |
-| `POST /score` per client            | 600 per 10 minutes, configurable                        | Room for an office behind one address           |
-| GitHub search                       | 1,000 results per query                                 | GitHub's own cap                                |
-| Reviews read per PR                 | 100 (all of mine)                                       | One GraphQL page; mine are paginated            |
-| Review comments read                | 100 per review                                          | One GraphQL page                                |
+| Limit                               | Value                                                                | Why                                                           |
+| ----------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- |
+| ↑ records per payload               | 500, newest kept                                                     | A week of one person never needs more                         |
+| ↓ records per payload               | 200, newest kept                                                     |                                                               |
+| Lines per class per record          | 1,000,000, clamped                                                   | One huge data file must not break the badge                   |
+| Request body                        | 512 KiB                                                              | The largest valid payload fits                                |
+| Validation problems echoed          | 10                                                                   | Keeps error answers small                                     |
+| Keys per object, array items, depth | 32, 1,000, 8                                                         | Rejected cheaply, before schema validation                    |
+| Failed records validated            | 10                                                                   | An invalid payload is rejected in milliseconds                |
+| Published globs                     | 1,000; 200 characters each; 2,000 patterns after braces; 32 segments | No regular expressions; 5 s classification budget per refresh |
+| `POST /score` per client            | 600 per 10 minutes, configurable                                     | Room for an office behind one address                         |
+| GitHub search                       | 1,000 results per query                                              | GitHub's own cap                                              |
+| Reviews read per PR                 | 100 (all of mine)                                                    | One GraphQL page; mine are paginated                          |
+| Review comments read                | 100 per review                                                       | One GraphQL page                                              |
 
 ### Errors
 

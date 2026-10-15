@@ -472,6 +472,7 @@ describe('upRecordsForPullRequest: second-review fixes', () => {
     const { context } = ctx();
     const records = await upRecordsForPullRequest(
       pr({
+        createdAt: hoursAgo(160),
         myReviews: [
           review({ id: 'old', submittedAt: hoursAgo(150) }),
           review({ id: 'again', submittedAt: hoursAgo(1) }),
@@ -546,7 +547,6 @@ describe('upRecordsForPullRequest: rescue and the draft lifecycle', () => {
       pr({
         createdAt: hoursAgo(200),
         readyForReviewAt: hoursAgo(100),
-        firstReadyAt: hoursAgo(100),
         myReviews: [
           review({ id: 'draft', submittedAt: hoursAgo(150) }),
           review({ id: 'ready', submittedAt: hoursAgo(40) }),
@@ -558,6 +558,11 @@ describe('upRecordsForPullRequest: rescue and the draft lifecycle', () => {
       ['draft', 0],
       ['ready', 60],
     ]);
+    // The review made once the PR was ready also carries the covered lines: the rescue counts.
+    expect(records.map((r) => [r.reviewId, r.linesByClass])).toEqual([
+      ['draft', {}],
+      ['ready', { production: 400 }],
+    ]);
   });
 
   it('keeps an earned rescue when the PR is converted to draft afterwards', async () => {
@@ -565,7 +570,8 @@ describe('upRecordsForPullRequest: rescue and the draft lifecycle', () => {
       pr({
         isDraft: true,
         createdAt: hoursAgo(120),
-        firstReadyAt: hoursAgo(120),
+        // Opened ready, converted to draft an hour ago.
+        readyPeriods: [{ from: hoursAgo(120), to: hoursAgo(1) }],
         myReviews: [review({ submittedAt: hoursAgo(60) })],
       }),
       ctx().context,
@@ -579,7 +585,10 @@ describe('upRecordsForPullRequest: rescue and the draft lifecycle', () => {
       pr({
         createdAt: hoursAgo(120),
         readyForReviewAt: hoursAgo(60),
-        firstReadyAt: hoursAgo(120),
+        readyPeriods: [
+          { from: hoursAgo(120), to: hoursAgo(90) },
+          { from: hoursAgo(60), to: null },
+        ],
         reviews: [
           summary({
             id: 'bob',
@@ -593,5 +602,23 @@ describe('upRecordsForPullRequest: rescue and the draft lifecycle', () => {
       ctx().context,
     );
     expect(records[0]!.waitedHoursWithoutReview).toBe(0);
+  });
+});
+
+describe('upRecordsForPullRequest: waiting counts ready time only', () => {
+  it('does not count a draft period as waiting', async () => {
+    // Opened ready 74 h ago, converted to draft a minute later, ready again 2 h ago, reviewed now.
+    const records = await upRecordsForPullRequest(
+      pr({
+        createdAt: hoursAgo(74),
+        readyPeriods: [
+          { from: hoursAgo(74), to: hoursAgo(74 - 1 / 60) },
+          { from: hoursAgo(2), to: null },
+        ],
+        myReviews: [review({ submittedAt: hoursAgo(1) })],
+      }),
+      ctx().context,
+    );
+    expect(records[0]!.waitedHoursWithoutReview).toBeCloseTo(1 + 1 / 60, 5);
   });
 });

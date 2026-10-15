@@ -6,6 +6,7 @@ import {
   GitHubRateLimitError,
   createGitHubClient,
   normalizeLogin,
+  readyPeriodsOf,
 } from '../src/lib/github/client.ts';
 import { fakeFetch, json } from './helpers/fetch.ts';
 
@@ -52,7 +53,7 @@ function rawPr(overrides: Record<string, unknown> = {}) {
     author: { login: 'alice', __typename: 'User' },
     assignees: { nodes: [{ login: 'me' }] },
     timelineItems: { nodes: [{ createdAt: '2026-10-14T11:00:00Z' }] },
-    firstStateEvent: {
+    stateEvents: {
       nodes: [{ __typename: 'ReadyForReviewEvent', createdAt: '2026-10-14T10:30:00Z' }],
     },
     commits: { nodes: [{ commit: { parents: { nodes: [{ oid: 'fork' }] } } }] },
@@ -216,7 +217,7 @@ describe('createGitHubClient', () => {
       author: { login: 'alice', type: 'User' },
       assignees: ['me'],
       readyForReviewAt: '2026-10-14T11:00:00Z',
-      firstReadyAt: '2026-10-14T10:30:00Z',
+      readyPeriods: [{ from: '2026-10-14T10:30:00Z', to: null }],
       headRefOid: 'h',
       baseRefOid: 'b',
       forkOid: 'fork',
@@ -287,7 +288,7 @@ describe('createGitHubClient', () => {
             pullRequest: rawPr({
               author: { login: 'renovate', __typename: 'Bot' },
               timelineItems: { nodes: [] },
-              firstStateEvent: {
+              stateEvents: {
                 nodes: [{ __typename: 'ConvertToDraftEvent', createdAt: '2026-10-14T12:00:00Z' }],
               },
               commits: { nodes: [] },
@@ -313,8 +314,10 @@ describe('createGitHubClient', () => {
     expect(details.author).toEqual({ login: 'renovate', type: 'Bot' });
     expect(details.readyForReviewAt).toBeNull();
     expect(details.forkOid).toBeNull();
-    // Converted to draft first: it was opened ready, so it became ready at creation.
-    expect(details.firstReadyAt).toBe('2026-10-14T10:00:00Z');
+    // Converted to draft first: it was opened ready, and ready until then.
+    expect(details.readyPeriods).toEqual([
+      { from: '2026-10-14T10:00:00Z', to: '2026-10-14T12:00:00Z' },
+    ]);
   });
 
   it('recognises an exhausted GraphQL budget, which GitHub answers with 200', async () => {
@@ -380,20 +383,50 @@ describe('createGitHubClient', () => {
   });
 });
 
-describe('firstReadyAt', () => {
-  it('is null for a draft that was never ready, and the creation time for a PR opened ready', async () => {
-    const read = async (overrides: Record<string, unknown>) => {
-      const client = createGitHubClient({
-        token: 't',
-        fetchImpl: fakeFetch(() =>
-          json({ data: { repository: { pullRequest: rawPr(overrides) } } }),
-        ),
-      });
-      return (await client.pullRequest('o', 'r', 1, 'me')).firstReadyAt;
-    };
-    expect(await read({ isDraft: true, firstStateEvent: { nodes: [] } })).toBeNull();
-    expect(await read({ isDraft: false, firstStateEvent: { nodes: [] } })).toBe(
-      '2026-10-14T10:00:00Z',
-    );
+describe('readyPeriodsOf', () => {
+  const created = '2026-10-12T09:00:00Z';
+
+  it('is empty for a draft that was never ready, and open-ended for a PR opened ready', () => {
+    expect(readyPeriodsOf(created, true, [])).toEqual([]);
+    expect(readyPeriodsOf(created, false, [])).toEqual([{ from: created, to: null }]);
+  });
+
+  it('follows every draft and ready event, in time order', () => {
+    // Opened ready, drafted a minute later, ready again three days later: the PR waited 1 h, not 73.
+    expect(
+      readyPeriodsOf(created, false, [
+        { type: 'ready', at: '2026-10-15T09:00:00Z' },
+        { type: 'draft', at: '2026-10-12T09:01:00Z' },
+      ]),
+    ).toEqual([
+      { from: created, to: '2026-10-12T09:01:00Z' },
+      { from: '2026-10-15T09:00:00Z', to: null },
+    ]);
+    // Opened as a draft, ready, then back to draft.
+    expect(
+      readyPeriodsOf(created, true, [
+        { type: 'ready', at: '2026-10-13T09:00:00Z' },
+        { type: 'draft', at: '2026-10-14T09:00:00Z' },
+      ]),
+    ).toEqual([{ from: '2026-10-13T09:00:00Z', to: '2026-10-14T09:00:00Z' }]);
+  });
+
+  it('reads the events from the GraphQL answer', async () => {
+    const client = createGitHubClient({
+      token: 't',
+      fetchImpl: fakeFetch(() =>
+        json({
+          data: {
+            repository: {
+              pullRequest: rawPr({
+                isDraft: true,
+                stateEvents: { nodes: [null, { __typename: 'Other' }] },
+              }),
+            },
+          },
+        }),
+      ),
+    });
+    expect((await client.pullRequest('o', 'r', 1, 'me')).readyPeriods).toEqual([]);
   });
 });
