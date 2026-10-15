@@ -1,7 +1,14 @@
 import { payloadV1, type } from '@review-ratio/contract';
 import { describe, expect, it } from 'vitest';
 
-import { buildPayload, hashUnit, roundLinesByClass } from '../src/lib/payload.ts';
+import {
+  MAX_DOWN_RECORDS,
+  MAX_LINES,
+  MAX_UP_RECORDS,
+  buildPayload,
+  hashUnit,
+  roundLinesByClass,
+} from '../src/lib/payload.ts';
 import { NOW } from './helpers/github.ts';
 
 describe('hashUnit', () => {
@@ -161,5 +168,53 @@ describe('buildPayload and the anchor invariant', () => {
       );
       expect(payload.up[0]!.linesByClass, `lines=${lines}`).toEqual(payload.down[0]!.linesByClass);
     }
+  });
+});
+
+describe('buildPayload within the contract limits', () => {
+  const up = (i: number, tMs = NOW - i * 60_000) => ({
+    reviewId: `r${i}`,
+    tMs,
+    action: 'thread_reply' as const,
+    linesByClass: {},
+    commentedLinesByClass: { production: 10 },
+    viewedLinesByClass: {},
+    waitedHoursWithoutReview: 0,
+  });
+
+  it('clamps a huge file instead of failing the whole payload', () => {
+    const payload = buildPayload(
+      [],
+      [
+        {
+          prKey: '0f6f9a1e-5a7d-4c1b-9d2e-2b1d8c3f4a5b',
+          readyAtMs: NOW,
+          closedAtMs: null,
+          linesByClass: { config: 1_200_000 },
+        },
+      ],
+    );
+    expect(payload.down[0]!.linesByClass).toEqual({ config: MAX_LINES });
+  });
+
+  it('keeps the newest records when there are too many', () => {
+    const many = Array.from({ length: MAX_UP_RECORDS + 20 }, (_, i) => up(i));
+    const payload = buildPayload(many, []);
+    expect(payload.up).toHaveLength(MAX_UP_RECORDS);
+    const oldestKept = Date.parse(payload.up[0]!.t);
+    expect(oldestKept).toBeGreaterThanOrEqual(NOW - (MAX_UP_RECORDS + 1) * 60_000 - 3_600_000);
+    const downs = Array.from({ length: MAX_DOWN_RECORDS + 5 }, (_, i) => ({
+      prKey: `0f6f9a1e-5a7d-4c1b-9d2e-${String(i).padStart(12, '0')}`,
+      readyAtMs: NOW - i * 3_600_000,
+      closedAtMs: null,
+      linesByClass: {},
+    }));
+    expect(buildPayload([], downs).down).toHaveLength(MAX_DOWN_RECORDS);
+  });
+
+  it('orders records by time, so their order does not group them by PR', () => {
+    const payload = buildPayload([up(1, NOW), up(2, NOW - 7_200_000), up(3, NOW - 3_600_000)], []);
+    const times = payload.up.map((r) => Date.parse(r.t));
+    expect(times).toEqual([...times].sort((a, b) => a - b));
   });
 });

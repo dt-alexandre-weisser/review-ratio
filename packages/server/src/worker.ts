@@ -6,10 +6,11 @@
  */
 import { createApp } from './app.ts';
 import { SCORE_RATE_LIMIT } from './limits.ts';
+import { networkKey } from './rate-limit.ts';
 
 export default createApp({
   rateLimit: {
     ...SCORE_RATE_LIMIT,
-    keyOf: (c) => c.req.header('cf-connecting-ip') ?? 'unknown',
+    keyOf: (c) => networkKey(c.req.header('cf-connecting-ip') ?? 'unknown'),
   },
 });

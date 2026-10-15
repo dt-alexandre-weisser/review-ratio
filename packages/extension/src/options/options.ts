@@ -96,32 +96,40 @@ async function testConnection(settings: Settings): Promise<void> {
   setStatus(ok ? 'ok' : 'warn', lines.join('\n'));
 }
 
+/** Why the form cannot be used, or `null`. Save and Refresh both refuse invalid settings. */
+function formProblem(settings: Settings): string | null {
+  if (!isValidOrg(settings.org)) return `"${settings.org}" is not a GitHub organisation name.`;
+  const urlProblem = serverUrlProblem(settings.serverUrl);
+  return urlProblem ? `${urlProblem[0]?.toUpperCase() ?? ''}${urlProblem.slice(1)}.` : null;
+}
+
+/** Saves valid settings, refreshes the badge with them, and reports the result. */
+async function saveAndRefresh(prefix: string): Promise<void> {
+  const settings = readForm();
+  const problem = formProblem(settings);
+  if (problem) {
+    setStatus('error', `Not saved. ${problem}`);
+    return;
+  }
+  await store.setSettings(settings);
+  fillForm(await store.getSettings());
+  setStatus('info', `${prefix}Refreshing the badge…`);
+  // Pushed to the open GitHub tabs too.
+  const response = await send({ type: 'badge:refresh' });
+  if (response.type === 'badge:view') {
+    setStatus(
+      response.view.stale ? 'warn' : 'ok',
+      `${prefix}${response.view.text}\n${response.view.tooltip}`,
+    );
+  } else if (response.type === 'error') {
+    setStatus('error', `${prefix}${response.message}`);
+  }
+  await showDiagnostics();
+}
+
 form.addEventListener('submit', (event) => {
   event.preventDefault();
-  void busy(buttons.save, async () => {
-    const settings = readForm();
-    if (!isValidOrg(settings.org)) {
-      setStatus('error', `"${settings.org}" is not a GitHub organisation name.`);
-      return;
-    }
-    const urlProblem = serverUrlProblem(settings.serverUrl);
-    if (urlProblem) {
-      setStatus('error', `Not saved: ${urlProblem}.`);
-      return;
-    }
-    await store.setSettings(settings);
-    fillForm(await store.getSettings());
-    setStatus('info', 'Saved. Refreshing the badge…');
-    // New settings deserve a fresh score now, pushed to the open GitHub tabs.
-    const response = await send({ type: 'badge:refresh' });
-    if (response.type === 'badge:view') {
-      setStatus(
-        response.view.stale ? 'warn' : 'ok',
-        `Saved. ${response.view.text}\n${response.view.tooltip}`,
-      );
-    }
-    await showDiagnostics();
-  });
+  void busy(buttons.save, () => saveAndRefresh('Saved. '));
 });
 
 buttons.test.addEventListener('click', () => {
@@ -132,20 +140,7 @@ buttons.test.addEventListener('click', () => {
 });
 
 buttons.refresh.addEventListener('click', () => {
-  void busy(buttons.refresh, async () => {
-    await store.setSettings(readForm());
-    setStatus('info', 'Refreshing…');
-    const response = await send({ type: 'badge:refresh' });
-    if (response.type === 'badge:view') {
-      setStatus(
-        response.view.stale ? 'warn' : 'ok',
-        `${response.view.text}\n${response.view.tooltip}`,
-      );
-    } else if (response.type === 'error') {
-      setStatus('error', response.message);
-    }
-    await showDiagnostics();
-  });
+  void busy(buttons.refresh, () => saveAndRefresh(''));
 });
 
 buttons.forget.addEventListener('click', () => {

@@ -33,11 +33,17 @@ const deps: RefreshDeps = {
   },
 };
 
-/** One refresh at a time per worker instance. The storage lock covers worker restarts. */
-let inFlight: Promise<void> | null = null;
+/**
+ * Refreshes run one after another. A forced refresh (options page) always runs, after the one in
+ * progress, so it sees the settings just saved. Background checks from GitHub tabs are deduplicated:
+ * at most one waits in the queue. The storage lock covers worker restarts.
+ */
+let queue: Promise<void> = Promise.resolve();
+let backgroundQueued = false;
 
-function runExclusive(task: () => Promise<unknown>): Promise<void> {
-  inFlight ??= (async () => {
+function enqueue(task: () => Promise<unknown>): Promise<void> {
+  const run = queue.then(async () => {
+    // Extension API calls reset the worker's idle timer; a long refresh of fetches does not.
     const keepAlive = setInterval(() => {
       void chrome.runtime.getPlatformInfo();
     }, KEEP_ALIVE_MS);
@@ -47,14 +53,14 @@ function runExclusive(task: () => Promise<unknown>): Promise<void> {
       console.error('[review-ratio] refresh crashed', error);
     } finally {
       clearInterval(keepAlive);
-      inFlight = null;
     }
-  })();
-  return inFlight;
+  });
+  queue = run;
+  return run;
 }
 
 async function broadcastBadge(): Promise<void> {
-  const view = badgeView(await store.getBadge());
+  const view = badgeView(await store.getBadge(), Date.now());
   const message: BadgeUpdate = { type: 'badge:update', view };
   let tabs: chrome.tabs.Tab[];
   try {
@@ -76,7 +82,10 @@ async function broadcastBadge(): Promise<void> {
 }
 
 function refreshInBackground(): void {
-  void runExclusive(async () => {
+  if (backgroundQueued) return;
+  backgroundQueued = true;
+  void enqueue(async () => {
+    backgroundQueued = false;
     if ((await refreshIfDue(deps)).refreshed) await broadcastBadge();
   });
 }
@@ -86,14 +95,14 @@ async function handle(request: Request): Promise<Response> {
     case 'badge:get': {
       const cache = await store.getBadge();
       refreshInBackground();
-      return { type: 'badge:view', view: badgeView(cache) };
+      return { type: 'badge:view', view: badgeView(cache, Date.now()) };
     }
     case 'badge:refresh': {
-      await runExclusive(async () => {
+      await enqueue(async () => {
         await refresh(deps);
         await broadcastBadge();
       });
-      return { type: 'badge:view', view: badgeView(await store.getBadge()) };
+      return { type: 'badge:view', view: badgeView(await store.getBadge(), Date.now()) };
     }
     case 'cache:get':
       return { type: 'cache', cache: await store.getBadge() };

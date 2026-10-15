@@ -61,6 +61,14 @@ describe('isRefreshDue', () => {
     expect(isRefreshDue({ ...EMPTY_CACHE, refreshStartedAt: NOW - 4 * 60_000 }, NOW)).toBe(true);
   });
 
+  it('ignores times left in the future by a clock jump', () => {
+    const later = NOW + 24 * 3_600_000;
+    expect(isRefreshDue({ ...EMPTY_CACHE, attemptedAt: later, refreshStartedAt: later }, NOW)).toBe(
+      true,
+    );
+    expect(isRefreshDue({ ...EMPTY_CACHE, notBefore: later }, NOW)).toBe(true);
+  });
+
   it('waits for a GitHub rate limit to reset', () => {
     expect(isRefreshDue({ ...EMPTY_CACHE, notBefore: NOW + 1 }, NOW)).toBe(false);
     expect(isRefreshDue({ ...EMPTY_CACHE, notBefore: NOW }, NOW)).toBe(true);

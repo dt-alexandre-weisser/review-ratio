@@ -2,11 +2,12 @@
 
 ## Server configuration
 
-| Variable             | Default     | Meaning                                                                                                                                                      |
-| -------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `PORT`               | `8787`      | Listening port. The Docker image sets `8080`.                                                                                                                |
-| `HOST`               | `127.0.0.1` | Listening address. The Docker image sets `0.0.0.0`.                                                                                                          |
-| `TRUSTED_PROXY_HOPS` | none        | Proxies in front of the server that append to `X-Forwarded-For`. Required whenever `HOST` is not a loopback address: the server refuses to start without it. |
+| Variable                | Default     | Meaning                                                                                                                                                         |
+| ----------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                  | `8787`      | Listening port. The Docker image sets `8080`.                                                                                                                   |
+| `HOST`                  | `127.0.0.1` | Listening address. The Docker image sets `0.0.0.0`.                                                                                                             |
+| `TRUSTED_PROXY_HOPS`    | none        | Proxies in front of the server that append to `X-Forwarded-For`. Required whenever `HOST` is not a loopback address: the server refuses to start without it.    |
+| `RATE_LIMIT_PER_10_MIN` | `600`       | `POST /score` requests per client address and 10 minutes. A badge needs about one; size it for the developers behind your largest shared address (office, VPN). |
 
 `TRUSTED_PROXY_HOPS` decides what the rate limit keys on:
 
@@ -16,7 +17,8 @@
 | Cloud Run (Google's front end appends one) | `1`   | last `X-Forwarded-For` entry |
 | A load balancer in front of Cloud Run      | `2`   | second to last entry         |
 
-A wrong value either lets clients forge their key or puts every client in one bucket.
+A wrong value either lets clients forge their key or puts every client in one bucket. Check the
+value with a real request before launch. IPv6 clients are keyed by their /64 prefix.
 
 Endpoints:
 
@@ -47,7 +49,15 @@ docker run --rm -p 8080:8080 -e TRUSTED_PROXY_HOPS=0 review-ratio-server
 
 The image runs one self-contained bundle, with source maps, as the unprivileged `node` user on
 root-owned code. It has no package manager and a health check on `/health`. The base image is
-pinned by digest; Dependabot proposes updates. On Cloud Run, set `TRUSTED_PROXY_HOPS=1`.
+pinned by digest in the `FROM` lines; Dependabot proposes updates. On Cloud Run, set
+`TRUSTED_PROXY_HOPS=1`.
+
+Cloud Run's request logs record client addresses and user agents. The app logs neither; to keep
+the platform from doing it, add a log exclusion before the remote phase:
+
+```sh
+gcloud logging sinks update _Default --add-exclusion=name=review-ratio-requests,filter='resource.type="cloud_run_revision" AND log_name:"run.googleapis.com%2Frequests" AND resource.labels.service_name="review-ratio"'
+```
 
 ## Remote: Cloudflare Workers
 

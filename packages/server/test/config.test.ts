@@ -1,18 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_PORT, loadConfig } from '../src/config.ts';
+import { DEFAULT_PORT, DEFAULT_SCORE_RATE_LIMIT, loadConfig } from '../src/config.ts';
 
 describe('loadConfig', () => {
   it('defaults to the loopback prototype setup', () => {
-    expect(loadConfig({})).toEqual({ port: DEFAULT_PORT, host: '127.0.0.1', trustedProxyHops: 0 });
+    expect(loadConfig({})).toEqual({
+      port: DEFAULT_PORT,
+      host: '127.0.0.1',
+      trustedProxyHops: 0,
+      rateLimitPer10Min: DEFAULT_SCORE_RATE_LIMIT,
+    });
   });
 
   it('reads valid values', () => {
-    expect(loadConfig({ PORT: '8080', HOST: '0.0.0.0', TRUSTED_PROXY_HOPS: '1' })).toEqual({
-      port: 8080,
-      host: '0.0.0.0',
-      trustedProxyHops: 1,
-    });
+    expect(
+      loadConfig({
+        PORT: '8080',
+        HOST: '0.0.0.0',
+        TRUSTED_PROXY_HOPS: '1',
+        RATE_LIMIT_PER_10_MIN: '5000',
+      }),
+    ).toEqual({ port: 8080, host: '0.0.0.0', trustedProxyHops: 1, rateLimitPer10Min: 5000 });
+    expect(() => loadConfig({ RATE_LIMIT_PER_10_MIN: '0' })).toThrow(/at least 1/);
   });
 
   it('rejects malformed numbers instead of half-parsing them', () => {

@@ -10,7 +10,16 @@ import { isBadgeUpdate, type Request, type Response } from '../lib/messages.ts';
 import { mount } from './badge.ts';
 
 const REMOUNT_INTERVAL_MS = 5_000;
-const NAVIGATION_EVENTS = ['turbo:load', 'turbo:render', 'pjax:end', 'pageshow'];
+// GitHub navigates without page loads (Turbo, then its own soft navigation); the periodic remount
+// covers any event not listed here.
+const NAVIGATION_EVENTS = [
+  'turbo:load',
+  'turbo:render',
+  'soft-nav:end',
+  'soft-nav:render',
+  'pjax:end',
+  'pageshow',
+];
 
 let lastView: BadgeView | null = null;
 

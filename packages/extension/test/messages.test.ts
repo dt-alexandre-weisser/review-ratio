@@ -15,7 +15,7 @@ describe('message guards', () => {
   });
 
   it('accepts badge updates with a view only', () => {
-    expect(isBadgeUpdate({ type: 'badge:update', view: badgeView(EMPTY_CACHE) })).toBe(true);
+    expect(isBadgeUpdate({ type: 'badge:update', view: badgeView(EMPTY_CACHE, 0) })).toBe(true);
     expect(isBadgeUpdate({ type: 'badge:update' })).toBe(false);
     expect(isBadgeUpdate({ type: 'badge:get', view: {} })).toBe(false);
     expect(isBadgeUpdate(undefined)).toBe(false);

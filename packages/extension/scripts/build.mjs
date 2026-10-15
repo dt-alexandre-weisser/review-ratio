@@ -25,7 +25,7 @@ mkdirSync(dist, { recursive: true });
 /** @type {import('esbuild').BuildOptions} */
 const common = {
   bundle: true,
-  target: ['chrome116'],
+  target: ['chrome140'],
   sourcemap: watch ? 'inline' : false,
   minify: !watch,
   legalComments: 'none',

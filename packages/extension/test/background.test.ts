@@ -131,3 +131,20 @@ describe('background worker', () => {
     expect(chromeMock.runtime.openOptionsPage).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('background worker refresh queue', () => {
+  it('runs a forced refresh after the one in progress, with the settings just saved', async () => {
+    // A background refresh starts with no token; the options page then saves one and forces a
+    // refresh. The forced refresh must see the token, not reuse the running refresh.
+    const area = chromeMock.storage.local;
+    await area.set({ badge: {}, settings: { token: '' } });
+    const background = send({ type: 'badge:get' }, fromGitHub);
+    await area.set({ settings: { token: 'tok', serverUrl: 'http://127.0.0.1:1' } });
+    const forced = await send({ type: 'badge:refresh' }, fromOptions);
+    await background;
+    // With a token, the refresh got past the token check and failed on the unreachable server.
+    expect(forced).toMatchObject({ type: 'badge:view', view: { stale: true } });
+    const cache = await send({ type: 'cache:get' }, fromOptions);
+    expect(cache).toMatchObject({ type: 'cache', cache: { status: 'stale' } });
+  });
+});

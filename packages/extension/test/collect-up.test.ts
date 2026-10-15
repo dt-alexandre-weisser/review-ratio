@@ -97,8 +97,10 @@ describe('firstReviewId', () => {
       summary({ id: 'later', submittedAt: hoursAgo(2) }),
       summary({ id: 'first', submittedAt: hoursAgo(5) }),
     ];
-    expect(firstReviewId(reviews, new Set(['me']))).toBe('first');
-    expect(firstReviewId([], new Set())).toBeNull();
+    expect(firstReviewId(reviews, new Set(['me']), 0)).toBe('first');
+    expect(firstReviewId([], new Set(), 0)).toBeNull();
+    // Reviews of the draft, before it was ready, do not count.
+    expect(firstReviewId(reviews, new Set(['me']), Date.parse(hoursAgo(3)))).toBe('later');
   });
 });
 
@@ -462,5 +464,77 @@ describe('upRecordsForPullRequest: rescue and ownership', () => {
         context,
       ),
     ).toHaveLength(1);
+  });
+});
+
+describe('upRecordsForPullRequest: second-review fixes', () => {
+  it('keeps the credit on the first of two approvals of the same commit, so decay is not reset', async () => {
+    const { context } = ctx();
+    const records = await upRecordsForPullRequest(
+      pr({
+        myReviews: [
+          review({ id: 'old', submittedAt: hoursAgo(150) }),
+          review({ id: 'again', submittedAt: hoursAgo(1) }),
+        ],
+      }),
+      context,
+    );
+    expect(records.map((r) => [r.reviewId, r.linesByClass])).toEqual([
+      ['old', { production: 400 }],
+      ['again', {}],
+    ]);
+  });
+
+  it('moves the rescue with the credit: comment then approve equals approve', async () => {
+    const waitedPr = (myReviews: ReturnType<typeof review>[]) =>
+      pr({ createdAt: hoursAgo(80), myReviews });
+    const direct = await upRecordsForPullRequest(
+      waitedPr([review({ id: 'a', submittedAt: hoursAgo(8) })]),
+      ctx().context,
+    );
+    const commentFirst = await upRecordsForPullRequest(
+      waitedPr([
+        review({ id: 'c', submittedAt: hoursAgo(8), state: 'COMMENTED', body: 'q' }),
+        review({ id: 'a', submittedAt: hoursAgo(7) }),
+      ]),
+      ctx().context,
+    );
+    expect(direct[0]!.waitedHoursWithoutReview).toBe(72);
+    expect(commentFirst.map((r) => [r.reviewId, r.waitedHoursWithoutReview])).toEqual([
+      ['c', 0],
+      ['a', 72],
+    ]);
+  });
+
+  it('gives no rescue on a draft that was never marked ready', async () => {
+    const records = await upRecordsForPullRequest(
+      pr({
+        isDraft: true,
+        createdAt: hoursAgo(72),
+        myReviews: [review({ state: 'COMMENTED', body: 'early thoughts' })],
+      }),
+      ctx().context,
+    );
+    expect(records[0]!.waitedHoursWithoutReview).toBe(0);
+  });
+
+  it('measures the wait from ready-for-review, ignoring earlier draft reviews', async () => {
+    const records = await upRecordsForPullRequest(
+      pr({
+        createdAt: hoursAgo(200),
+        readyForReviewAt: hoursAgo(60),
+        reviews: [
+          summary({
+            id: 'draft-feedback',
+            author: { login: 'bob', type: 'User' },
+            submittedAt: hoursAgo(100),
+          }),
+          summary({ id: 'mine', author: { login: 'me', type: 'User' }, submittedAt: hoursAgo(5) }),
+        ],
+        myReviews: [review({ id: 'mine', submittedAt: hoursAgo(5) })],
+      }),
+      ctx().context,
+    );
+    expect(records[0]!.waitedHoursWithoutReview).toBe(55);
   });
 });

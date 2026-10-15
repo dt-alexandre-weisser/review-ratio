@@ -32,7 +32,8 @@ github.com page ──► extension (MV3) ──► GitHub API (your own token, 
 
 ## Quick start (prototype)
 
-Prerequisites: Node 22.13 or later, pnpm 10 (`corepack enable`), Chrome, Edge, Brave or Arc.
+Prerequisites: Node 22.13 or later, pnpm 10 (`corepack enable`), and a Chromium browser version 140
+or later (Chrome, Edge, Brave or Arc).
 
 ```sh
 pnpm install

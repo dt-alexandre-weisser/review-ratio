@@ -2,7 +2,7 @@
  * Pure mapping from the cached state to what the badge shows. See DESIGN.md › Badge.
  */
 import type { BadgeCache } from './storage.ts';
-import { REFRESH_INTERVAL_MS, localClock } from './time.ts';
+import { REFRESH_LOCK_MS, localClock } from './time.ts';
 
 export type Tone = 'good' | 'neutral' | 'low';
 
@@ -34,7 +34,7 @@ export function toneOf(ratio: number | null, up: number): Tone {
   return 'low';
 }
 
-export function badgeView(cache: BadgeCache): BadgeView {
+export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
   if (cache.status === 'no_token') {
     return {
       text: 'review-ratio: set up',
@@ -63,7 +63,7 @@ export function badgeView(cache: BadgeCache): BadgeView {
     };
   }
 
-  const stale = isStale(cache);
+  const stale = isStale(cache, nowMs);
   const score = cache.score;
   if (!score) {
     return {
@@ -99,11 +99,11 @@ export function badgeView(cache: BadgeCache): BadgeView {
 }
 
 /**
- * Whether the score shown is out of date: the last refresh failed, or refreshes keep being
- * attempted without succeeding (a service worker killed mid-refresh leaves the status `ok`).
+ * Whether the score shown is out of date: the last refresh failed, or a refresh started and
+ * never finished (a service worker killed mid-refresh leaves the status `ok`). A refresh that is
+ * merely running does not grey the badge.
  */
-export function isStale(cache: BadgeCache): boolean {
+export function isStale(cache: BadgeCache, nowMs: number): boolean {
   if (cache.status === 'stale' || cache.status === 'github_error') return true;
-  if (cache.attemptedAt === null) return false;
-  return cache.scoredAt === null || cache.attemptedAt - cache.scoredAt > 2 * REFRESH_INTERVAL_MS;
+  return cache.refreshStartedAt !== null && nowMs - cache.refreshStartedAt > REFRESH_LOCK_MS;
 }

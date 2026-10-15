@@ -8,6 +8,7 @@ import { PUBLISHED_CLASSES } from './classes.ts';
 import { DECODERS, RETIRED_MAJORS, readContractVersion, type Decoder } from './decoders/index.ts';
 import { score } from './formula.ts';
 import { rateLimit, type RateLimitOptions } from './rate-limit.ts';
+import { shapeProblem } from './shape.ts';
 
 declare module 'hono' {
   interface ContextVariableMap {
@@ -185,6 +186,11 @@ export function createApp(options: AppOptions = {}) {
           'unsupported_version',
           `Contract major ${major} is unknown to this server.`,
         );
+      }
+
+      const tooLarge = shapeProblem(raw);
+      if (tooLarge) {
+        return fail(c, 400, 'invalid_payload', `Payload is malformed: ${tooLarge}.`);
       }
 
       const decoded = decoder.decode(raw);

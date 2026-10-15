@@ -92,7 +92,7 @@ describe('collectWindow', () => {
     expect(result.down[0]!.prKey).toBe('kept-key');
   });
 
-  it('keeps only the Viewed snapshots of reviews still in the window', async () => {
+  it('keeps the Viewed snapshots taken within the window, even of a PR skipped this time', async () => {
     const withViewed = pr({
       number: 5,
       files: [{ path: 'a.ts', additions: 10, deletions: 0, viewerViewedState: 'VIEWED' }],
@@ -100,10 +100,13 @@ describe('collectWindow', () => {
     });
     const result = await collectWindow(
       input(fakeGitHub({ prs: [withViewed] }), {
-        viewedSnapshots: { gone: { linesByClass: { production: 10 }, takenAt: 0 } },
+        viewedSnapshots: {
+          old: { linesByClass: { production: 10 }, takenAt: NOW - 8 * 24 * 3_600_000 },
+          skipped: { linesByClass: { production: 20 }, takenAt: NOW - 3_600_000 },
+        },
       }),
     );
-    expect(Object.keys(result.viewedSnapshots)).toEqual(['r5']);
+    expect(Object.keys(result.viewedSnapshots).sort()).toEqual(['r5', 'skipped']);
   });
 
   it('caches comparisons and serves them without calling GitHub again', async () => {

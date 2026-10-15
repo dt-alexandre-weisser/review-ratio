@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { ServerError, UpgradeRequiredError, createServerClient } from '../src/lib/server-client.ts';
+import {
+  MAX_GLOB_LENGTH,
+  MAX_GLOBS,
+  ServerError,
+  UpgradeRequiredError,
+  classesProblem,
+  createServerClient,
+} from '../src/lib/server-client.ts';
 import { fakeFetch, json } from './helpers/fetch.ts';
 
 const payload = { contractVersion: 1 as const, up: [], down: [] };
@@ -56,5 +63,32 @@ describe('createServerClient', () => {
       fakeFetch(() => json({ classes: [{ name: 'nope', globs: [] }] })),
     );
     await expect(badClasses.fetchClasses()).rejects.toThrow(/invalid classes/);
+  });
+});
+
+describe('classesProblem', () => {
+  it('refuses globs that would make classification costly or ambiguous', () => {
+    expect(classesProblem([{ name: 'docs', globs: ['**/*.md'] }])).toBeNull();
+    expect(
+      classesProblem([
+        { name: 'docs', globs: [] },
+        { name: 'docs', globs: [] },
+      ]),
+    ).toMatch(/twice/);
+    expect(
+      classesProblem([{ name: 'docs', globs: new Array<string>(MAX_GLOBS + 1).fill('*.md') }]),
+    ).toMatch(/more than/);
+    expect(classesProblem([{ name: 'docs', globs: ['x'.repeat(MAX_GLOB_LENGTH + 1)] }])).toMatch(
+      /longer/,
+    );
+    expect(classesProblem([{ name: 'docs', globs: [''] }])).toMatch(/empty/);
+  });
+
+  it('rejects such a response when fetching the classes', async () => {
+    const client = createServerClient(
+      'http://x',
+      fakeFetch(() => json({ classes: [{ name: 'docs', globs: [''] }] })),
+    );
+    await expect(client.fetchClasses()).rejects.toBeInstanceOf(ServerError);
   });
 });

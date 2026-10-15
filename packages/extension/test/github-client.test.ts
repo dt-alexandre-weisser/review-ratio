@@ -308,6 +308,23 @@ describe('createGitHubClient', () => {
     expect(details.forkOid).toBeNull();
   });
 
+  it('recognises an exhausted GraphQL budget, which GitHub answers with 200', async () => {
+    const limited = createGitHubClient({
+      token: 't',
+      fetchImpl: fakeFetch(() =>
+        json(
+          { errors: [{ type: 'RATE_LIMITED', message: 'API rate limit exceeded' }] },
+          { headers: { 'x-ratelimit-reset': '1800000000' } },
+        ),
+      ),
+    });
+    const error = (await limited
+      .pullRequest('o', 'r', 1, 'me')
+      .catch((e: unknown) => e)) as GitHubRateLimitError;
+    expect(error).toBeInstanceOf(GitHubRateLimitError);
+    expect(error.resetAtMs).toBe(1_800_000_000_000);
+  });
+
   it('reports GraphQL errors and missing pull requests', async () => {
     const notFound = createGitHubClient({
       token: 't',

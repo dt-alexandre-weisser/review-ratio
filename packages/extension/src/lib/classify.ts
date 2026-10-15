@@ -10,9 +10,12 @@ import type { PublishedClass } from './storage.ts';
 
 export type Classifier = (path: string) => FileClass;
 
-/** Case-sensitive like Git paths, so `*Test.*` never matches `latest.ts`. */
-// `windows: false`: GitHub paths always use `/`, whatever OS the browser runs on.
-const MATCH_OPTIONS: picomatch.PicomatchOptions = { dot: true, windows: false };
+/**
+ * Case-sensitive like Git paths, so `*Test.*` never matches `latest.ts`. `windows: false`: GitHub
+ * paths always use `/`, whatever OS the browser runs on. `noextglob`: the published globs need no
+ * extended patterns, which are the ones that can compile to slow regular expressions.
+ */
+const MATCH_OPTIONS: picomatch.PicomatchOptions = { dot: true, windows: false, noextglob: true };
 
 /** Builds a classifier: first matching class wins, `production` when nothing matches. */
 export function createClassifier(classes: readonly PublishedClass[]): Classifier {

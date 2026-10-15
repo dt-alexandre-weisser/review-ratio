@@ -7,15 +7,16 @@
  *   first one. They are counted per file, only for files of the PR, each capped by that file's
  *   own diff: a merge of the base branch into the PR never counts as reviewed code.
  * - Each reviewed commit range is credited once, to my strongest review on that commit
- *   (approve or request changes, else a comment review). Commenting first, then approving the
- *   same commit, is worth the same as approving.
+ *   (approve or request changes, else a comment review; the earliest among equals, so a second
+ *   approval cannot restart the decay). Commenting first, then approving the same commit, is
+ *   worth the same as approving: the credited review also takes the range's rescue.
  * - A `COMMENTED` review with an empty body whose comments are all replies is a thread reply:
  *   it earns the commented-lines term only and does not move the previous-review anchor.
  * - Comment ranges are capped at 20 lines.
  * - The Viewed bonus covers the files of the credited range that I marked Viewed, from a
  *   snapshot taken while that commit was still the PR head.
  * - `waitedHoursWithoutReview` is set when my review is the first review by a human who does
- *   not own the PR.
+ *   not own the PR, after it was marked ready for review. Draft time never counts as waiting.
  */
 import type { LinesByClassV1, ReviewActionV1 } from '@review-ratio/contract';
 
@@ -76,10 +77,14 @@ export function commentLines(comment: Review['comments'][number]): number {
   return Math.min(COMMENT_RANGE_CAP, Math.max(1, end - start + 1));
 }
 
-/** The first submitted review by a human who does not own the PR. */
+/**
+ * The first review submitted from `readyAtMs` on by a human who does not own the PR. Reviews
+ * of the draft are early feedback, not the review the PR was waiting for.
+ */
 export function firstReviewId(
   reviews: readonly ReviewSummary[],
   owners: ReadonlySet<string>,
+  readyAtMs: number,
 ): string | null {
   let first: { id: string; at: number } | null = null;
   for (const review of reviews) {
@@ -87,6 +92,7 @@ export function firstReviewId(
     if (!review.author || review.author.type === 'Bot') continue;
     if (owners.has(normalizeLogin(review.author.login))) continue;
     const at = parseIso(review.submittedAt);
+    if (at < readyAtMs) continue;
     if (first === null || at < first.at) first = { id: review.id, at };
   }
   return first?.id ?? null;
@@ -138,8 +144,10 @@ interface Mine {
 interface Range {
   commit: string;
   previous: string | null;
-  /** The review that gets the covered lines and the Viewed bonus of this range. */
+  /** The review that gets the covered lines, the Viewed bonus and the rescue of this range. */
   credited: Mine;
+  /** Every real review of mine on this commit. */
+  members: Set<string>;
 }
 
 /** Groups my real reviews by reviewed commit, in order, and picks the review credited for each. */
@@ -151,13 +159,26 @@ function rangesOf(mine: readonly Mine[]): Range[] {
     if (strength(entry.action) === 0 || commit === null) continue;
     const range = ranges.get(commit);
     if (!range) {
-      ranges.set(commit, { commit, previous, credited: entry });
+      ranges.set(commit, {
+        commit,
+        previous,
+        credited: entry,
+        members: new Set([entry.review.id]),
+      });
       previous = commit;
-    } else if (strength(entry.action) >= strength(range.credited.action)) {
-      range.credited = entry;
+    } else {
+      range.members.add(entry.review.id);
+      // Strictly stronger only: among equals the earliest keeps the credit and its age.
+      if (strength(entry.action) > strength(range.credited.action)) range.credited = entry;
     }
   }
   return [...ranges.values()];
+}
+
+/** Hours from ready-for-review to the first review. */
+function waitedHours(pr: PullRequestDetails, firstId: string, readyAtMs: number): number {
+  const at = pr.reviews.find((r) => r.id === firstId)?.submittedAt;
+  return at ? Math.max(0, hoursBetween(readyAtMs, parseIso(at))) : 0;
 }
 
 export async function upRecordsForPullRequest(
@@ -177,7 +198,8 @@ export async function upRecordsForPullRequest(
   if (mine.length === 0) return [];
 
   const windowStart = ctx.nowMs - WINDOW_MS;
-  const ranges = rangesOf(mine).filter((r) => r.credited.tMs >= windowStart);
+  const allRanges = rangesOf(mine);
+  const ranges = allRanges.filter((r) => r.credited.tMs >= windowStart);
   const coveredByReview = new Map<string, FileLines>(
     await Promise.all(
       ranges.map(
@@ -187,8 +209,15 @@ export async function upRecordsForPullRequest(
     ),
   );
 
-  const first = firstReviewId(pr.reviews, ownersOf(pr));
+  // A PR still in draft, never marked ready, was not waiting for anyone.
   const readyAtMs = readyAtOf(pr);
+  const waiting = !(pr.isDraft && pr.readyForReviewAt === null);
+  const firstId = waiting ? firstReviewId(pr.reviews, ownersOf(pr), readyAtMs) : null;
+  // When the first review is one of mine on a reviewed commit, the rescue goes with the credit.
+  const rescuedId =
+    allRanges.find((r) => firstId !== null && r.members.has(firstId))?.credited.review.id ??
+    firstId;
+
   const viewedNow = new Set(
     pr.files.filter((f) => f.viewerViewedState === 'VIEWED').map((f) => f.path),
   );
@@ -221,7 +250,8 @@ export async function upRecordsForPullRequest(
         ctx.classify,
       ),
       viewedLinesByClass: viewed,
-      waitedHoursWithoutReview: first === review.id ? Math.max(0, hoursBetween(readyAtMs, tMs)) : 0,
+      waitedHoursWithoutReview:
+        firstId !== null && rescuedId === review.id ? waitedHours(pr, firstId, readyAtMs) : 0,
     });
   }
   return records;

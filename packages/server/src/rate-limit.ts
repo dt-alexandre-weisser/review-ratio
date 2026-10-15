@@ -37,6 +37,30 @@ export function forwardedClientIp(
 }
 
 /**
+ * The rate-limit key of a client address. IPv6 clients usually hold a whole /64, so one key per
+ * full address would let a single client rotate through billions of keys: IPv6 addresses are
+ * keyed by their /64 prefix. IPv4 and IPv4-mapped addresses are keyed as they are.
+ */
+export function networkKey(ip: string): string {
+  const address =
+    ip
+      .trim()
+      .replace(/^\[|\]$/g, '')
+      .split('%')[0] ?? '';
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
+  if (mapped?.[1]) return mapped[1];
+  if (!address.includes(':')) return address;
+  const [head = '', tail = ''] = address.split('::');
+  const left = head ? head.split(':') : [];
+  const right = address.includes('::') && tail ? tail.split(':') : [];
+  const groups = address.includes('::')
+    ? [...left, ...Array<string>(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right]
+    : left;
+  const prefix = groups.slice(0, 4).map((g) => (Number.parseInt(g, 16) || 0).toString(16));
+  return `${prefix.join(':')}::/64`;
+}
+
+/**
  * Fixed-window rate limit kept in memory. Good enough for one stateless instance: the endpoint
  * is anonymous, so the limit only has to stop a runaway client, not an attacker with many IPs.
  */

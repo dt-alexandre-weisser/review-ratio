@@ -40,8 +40,13 @@ jobs:
       - name: No released contract major changed against main
         run: |
           base="$RUNNER_TEMP/base-frozen.json"
+          # A failed fetch fails the step; only a main without frozen.json yet compares with {}.
           git fetch --no-tags --depth=1 origin main
-          git show origin/main:packages/contract/frozen.json > "$base" 2> /dev/null || echo '{}' > "$base"
+          if git cat-file -e origin/main:packages/contract/frozen.json; then
+            git show origin/main:packages/contract/frozen.json > "$base"
+          else
+            echo '{}' > "$base"
+          fi
           node packages/contract/scripts/freeze.mjs --against "$base"
       - name: Unit tests, contract gates (fixtures and anchor invariant per major), coverage
         run: pnpm test:coverage
@@ -133,7 +138,7 @@ jobs:
           curl -fsS -X POST http://127.0.0.1:8080/score -H 'content-type: application/json' -d "$body" | tee /dev/stderr | grep -q '"ratio":null'
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/score -H 'content-type: text/plain' -d "$body")" = 415
           test "$(docker exec rr id -u)" != "0"
-          docker exec rr sh -c '! command -v npm'
+          docker exec rr sh -c '! command -v npm && ! command -v apk'
       - name: Container logs
         if: always()
         run: docker logs rr || true

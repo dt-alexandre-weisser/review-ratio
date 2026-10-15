@@ -71,12 +71,18 @@ point to tune; changing them never breaks the contract.
   base branch into the PR ("Update branch") or a rebase brings in other files and larger diffs;
   none of that counts as reviewed code.
 - Each reviewed commit is credited once, to my strongest review on it: an approval or a change
-  request beats a comment review. Commenting first and approving the same commit afterwards is
-  worth the same as approving. The weaker review keeps its commented lines.
+  request beats a comment review. Among equally strong reviews the earliest keeps the credit, so
+  approving the same commit again does not restart its decay. Commenting first and approving the
+  same commit afterwards is worth the same as approving, rescue included. The weaker review keeps
+  its commented lines.
+- A review whose commit GitHub no longer knows covers nothing: it cannot be placed in the PR's
+  history without risking double counting.
 - When GitHub cannot compare any more (force-push, garbage-collected commit, server error), the
   review covers the PR's diff.
 - GitHub returns at most 300 files per comparison. Larger diffs are undercounted.
 - Comparisons of two SHAs never change, so they are cached locally between refreshes.
+- Records are sent sorted by time, ties in hash order, so their order does not group the reviews
+  of one PR.
 
 ### Review actions
 
@@ -100,15 +106,18 @@ question below.
   the files that changed since my previous review. Files that stayed Viewed from an earlier round
   do not earn it again.
 - The snapshot is taken while the reviewed commit is still the PR head, and reused once the head
-  moves. Snapshots of reviews that left the window are dropped.
+  moves. Snapshots are kept for 7 days, even when their PR could not be read on one refresh.
 
 ### Ownership and rescue
 
 - A PR is mine when I authored it, or when it is a `github-actions` PR assigned to me. I earn no ↑
   on a PR that is mine, even when GitHub lets me approve it.
-- `waitedHoursWithoutReview` is non-zero only when my review is the first review by a human who
-  does not own the PR. It is measured from ready-for-review to my review, rounded up, so the
-  server's "more than 48 hours" test is exact.
+- `waitedHoursWithoutReview` is non-zero only when my review is the first review submitted after
+  the PR was marked ready, by a human who does not own it. Reviews of the draft do not count, and a
+  PR still in draft was not waiting at all. The wait is measured from ready-for-review to that
+  first review, rounded up, so the server's "more than 48 hours" test is exact. When my first
+  review is a comment followed by an approval of the same commit, the rescue goes to the approval,
+  with the covered lines.
 
 ### ↓ side
 
@@ -133,11 +142,14 @@ question below.
   GitHub call.
 - One PR that GitHub cannot serve is skipped and reported in the options page. The refresh fails
   when most PRs fail, or on an auth or rate-limit error.
-- A GitHub rate limit postpones the next refresh until it resets.
+- A GitHub rate limit (REST or GraphQL) postpones the next refresh until it resets, at most an
+  hour. Times left in the future by a clock change are ignored.
+- Refreshes run one at a time. A refresh forced from the options page runs after the one in
+  progress, so it always uses the settings just saved.
 - A refresh marks its start in storage. Another may start only after 3 minutes, which covers a
-  service worker killed mid-refresh. While a refresh runs, the worker calls a cheap extension API
-  every 20 seconds so Chrome does not stop it for idleness. A score is shown greyed when refreshes
-  keep starting for 20 minutes without finishing.
+  service worker killed mid-refresh; the score is then shown greyed. While a refresh runs, the
+  worker calls a cheap extension API every 20 seconds so Chrome does not stop it for idleness, and
+  each GitHub request times out after 25 seconds, under Chrome's 30-second limit.
 
 ### Badge states
 
@@ -152,17 +164,20 @@ question below.
 
 ### Limits
 
-| Limit                      | Value                   | Why                                   |
-| -------------------------- | ----------------------- | ------------------------------------- |
-| ↑ records per payload      | 500                     | A week of one person never needs more |
-| ↓ records per payload      | 200                     |                                       |
-| Lines per class per record | 1,000,000               | Rejects absurd numbers                |
-| Request body               | 512 KiB                 | The largest valid payload fits        |
-| Validation problems echoed | 10                      | Keeps error answers small             |
-| `POST /score` per client   | 120 per 10 minutes      | Stops a runaway client                |
-| GitHub search              | 1,000 results per query | GitHub's own cap                      |
-| Reviews read per PR        | 100 (all of mine)       | One GraphQL page; mine are paginated  |
-| Review comments read       | 100 per review          | One GraphQL page                      |
+| Limit                               | Value                            | Why                                            |
+| ----------------------------------- | -------------------------------- | ---------------------------------------------- |
+| ↑ records per payload               | 500, newest kept                 | A week of one person never needs more          |
+| ↓ records per payload               | 200, newest kept                 |                                                |
+| Lines per class per record          | 1,000,000, clamped               | One huge data file must not break the badge    |
+| Request body                        | 512 KiB                          | The largest valid payload fits                 |
+| Validation problems echoed          | 10                               | Keeps error answers small                      |
+| Keys per object, array items, depth | 32, 1,000, 8                     | Rejected cheaply, before schema validation     |
+| Failed records validated            | 10                               | An invalid payload is rejected in milliseconds |
+| Published globs                     | 1,000, 200 characters each       | The server cannot make classification costly   |
+| `POST /score` per client            | 600 per 10 minutes, configurable | Room for an office behind one address          |
+| GitHub search                       | 1,000 results per query          | GitHub's own cap                               |
+| Reviews read per PR                 | 100 (all of mine)                | One GraphQL page; mine are paginated           |
+| Review comments read                | 100 per review                   | One GraphQL page                               |
 
 ### Errors
 

@@ -14,7 +14,8 @@
 
 - A fine-grained PAT with read-only permissions (Pull requests, Contents, Metadata).
 - Stored in `chrome.storage.local`, restricted to trusted contexts: the background worker and the
-  options page. Content scripts, and so a compromised github.com page, cannot read it.
+  options page. Content scripts, and so a compromised github.com page, cannot read it. Chrome
+  supports this restriction on `storage.local` from version 140, the extension's minimum.
 - Sent only to `api.github.com`, never logged.
 - The background worker serves content scripts the badge and nothing else. Forcing a refresh and
   reading diagnostics are reserved for the extension's own pages. Web pages and other extensions
@@ -34,13 +35,20 @@ JavaScript built-ins (`constructor`, `__proto__`…). The end-to-end test checks
 carries no organisation, repository, login, path, file extension or review id.
 
 Every install has the same extension id (the manifest pins a public key), so the `Origin` header of
-a request says nothing about the machine or the user.
+a request says nothing about the machine or the user. Records are sorted by time, so their order
+does not reveal which reviews belong to the same PR.
+
+The server's class globs are bounded (count and length) and matched without extended patterns, so
+a misbehaving server cannot make classification hang the browser.
 
 ## What the server keeps
 
 Nothing. It scores the payload in memory and answers. Request logs contain the method, path,
 status, duration and a request id the server generates; never the body, a token or a header.
-The Workers deployment ships with platform observability off.
+
+The hosting platform may log more than the app. The Workers deployment ships with platform
+observability off. Cloud Run records client addresses in its request logs by default: exclude
+them (docs/operations.md) before the remote phase.
 
 ## Known limits
 
@@ -54,9 +62,10 @@ The Workers deployment ships with platform observability off.
   phase: keep no logs of bodies or addresses, and consider a contract major that drops `prKey` and
   `closedAt` (unused by the formula), sends a `rescued` boolean instead of hours, and uses coarser
   line buckets. See docs/decisions.md › Open questions.
-- **Anonymous endpoint.** `POST /score` is rate limited per client in memory, and requires a JSON
-  content type, so web pages cannot spend a developer's quota with cross-site posts. Behind a
-  proxy, `TRUSTED_PROXY_HOPS` must be set, or the server refuses to start.
+- **Anonymous endpoint.** `POST /score` is rate limited per client address (per /64 for IPv6) in
+  memory, and requires a JSON content type, so web pages cannot spend a developer's quota with
+  cross-site posts. Oversized or malformed bodies are rejected before full validation, in
+  milliseconds. Behind a proxy, `TRUSTED_PROXY_HOPS` must be set, or the server refuses to start.
 - **Self-reported numbers.** A developer can forge their own payload. It only changes the badge
   they alone see.
 

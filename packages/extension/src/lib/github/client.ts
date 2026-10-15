@@ -50,7 +50,8 @@ export interface GitHubClientOptions {
   maxSearchPages?: number;
 }
 
-const REQUEST_TIMEOUT_MS = 30_000;
+/** Under Chrome's 30 s limit for a fetch response in a service worker, so a slow PR is skipped. */
+const REQUEST_TIMEOUT_MS = 25_000;
 const PER_PAGE = 100;
 
 /** Normalises a GitHub login for comparisons: lowercase, without the `[bot]` suffix. */
@@ -124,6 +125,11 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
     };
     if (json.errors?.length) {
       const messages = json.errors.map((e) => e.message).join('; ');
+      // An exhausted GraphQL budget answers 200 with a RATE_LIMITED error.
+      if (json.errors.some((e) => e.type === 'RATE_LIMITED')) {
+        const reset = Number(res.headers.get('x-ratelimit-reset'));
+        throw new GitHubRateLimitError(Number.isFinite(reset) && reset > 0 ? reset * 1000 : null);
+      }
       if (json.errors.some((e) => e.type === 'NOT_FOUND'))
         throw new GitHubError(`not found: ${messages}`, 404);
       throw new GitHubError(`GitHub GraphQL error: ${messages}`, res.status);

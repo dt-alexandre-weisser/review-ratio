@@ -39,7 +39,7 @@ export interface Collected {
   down: DownInput[];
   /** PR keys still in use. Keys of PRs that left the window are dropped. */
   prKeys: Record<string, string>;
-  /** Snapshots still in use. */
+  /** Snapshots taken within the window. */
   viewedSnapshots: Record<string, ViewedSnapshot>;
   /** Compare results used by this refresh. */
   compareCache: Record<string, CompareFile[]>;
@@ -170,17 +170,18 @@ export async function collectWindow(input: CollectInput): Promise<Collected> {
     );
   }
 
-  const usedSnapshots: Record<string, ViewedSnapshot> = {};
-  for (const record of up) {
-    const snap = snapshots[record.reviewId];
-    if (snap) usedSnapshots[record.reviewId] = snap;
+  // Keep every snapshot still within the window, used or not: a PR skipped once (GitHub error)
+  // must not lose the snapshot it can no longer retake after its head moved.
+  const keptSnapshots: Record<string, ViewedSnapshot> = {};
+  for (const [id, snap] of Object.entries(snapshots)) {
+    if (input.nowMs - snap.takenAt < WINDOW_MS) keptSnapshots[id] = snap;
   }
 
   return {
     up,
     down,
     prKeys,
-    viewedSnapshots: usedSnapshots,
+    viewedSnapshots: keptSnapshots,
     compareCache,
     skipped,
     total: results.length,

@@ -10,10 +10,9 @@
 # The runtime image holds one self-contained bundle (no node_modules), runs as `node`, and has no
 # package manager.
 
-# Multi-arch index digest of node:22.22.0-alpine. Dependabot keeps tag and digest in step.
-ARG NODE_IMAGE=node:22.22.0-alpine@sha256:e4bf2a82ad0a4037d28035ae71529873c069b13eb0455466ae0bc13363826e34
-
-FROM ${NODE_IMAGE} AS build
+# Both stages use the multi-arch index digest of node:22.22.0-alpine, written out in full so that
+# Dependabot can read and update tag and digest together (it does not follow build args).
+FROM node:22.22.0-alpine@sha256:e4bf2a82ad0a4037d28035ae71529873c069b13eb0455466ae0bc13363826e34 AS build
 WORKDIR /repo
 # Corepack checks the pnpm tarball against the hash pinned in package.json#packageManager.
 RUN corepack enable
@@ -28,11 +27,11 @@ COPY packages/contract packages/contract
 COPY packages/server packages/server
 RUN pnpm --filter @review-ratio/server build:node
 
-FROM ${NODE_IMAGE} AS runtime
-# No package manager at runtime: less to patch, nothing to install with.
+FROM node:22.22.0-alpine@sha256:e4bf2a82ad0a4037d28035ae71529873c069b13eb0455466ae0bc13363826e34 AS runtime
+# No package manager at runtime (npm, yarn, corepack, apk): less to patch, nothing to install with.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
       /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn \
-      /usr/local/bin/yarnpkg
+      /usr/local/bin/yarnpkg /sbin/apk /etc/apk /lib/apk /usr/share/apk /var/cache/apk
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8080

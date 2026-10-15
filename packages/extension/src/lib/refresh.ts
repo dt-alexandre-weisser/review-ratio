@@ -21,13 +21,26 @@ export interface RefreshDeps {
   log?: (message: string) => void;
 }
 
-/** Whether a refresh should start now: not in flight, not backing off, older than the interval. */
+/** A GitHub rate limit never asks to wait longer than this; a later date comes from a clock jump. */
+const MAX_BACKOFF_MS = 60 * 60 * 1000;
+
+/**
+ * Whether a refresh should start now: not in flight, not backing off, older than the interval.
+ * Times in the future (the clock was set back) are ignored rather than blocking refreshes.
+ */
 export function isRefreshDue(cache: BadgeCache, nowMs: number): boolean {
-  if (cache.notBefore !== null && nowMs < cache.notBefore) return false;
-  if (cache.refreshStartedAt !== null && nowMs - cache.refreshStartedAt < REFRESH_LOCK_MS) {
+  const past = (at: number | null): at is number => at !== null && at <= nowMs;
+  if (
+    cache.notBefore !== null &&
+    nowMs < cache.notBefore &&
+    cache.notBefore - nowMs <= MAX_BACKOFF_MS
+  ) {
     return false;
   }
-  if (cache.attemptedAt !== null && nowMs - cache.attemptedAt < REFRESH_INTERVAL_MS) return false;
+  if (past(cache.refreshStartedAt) && nowMs - cache.refreshStartedAt < REFRESH_LOCK_MS) {
+    return false;
+  }
+  if (past(cache.attemptedAt) && nowMs - cache.attemptedAt < REFRESH_INTERVAL_MS) return false;
   return true;
 }
 

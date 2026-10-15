@@ -38,6 +38,23 @@ export interface ServerClient {
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/** Bounds on the published globs: the server must not be able to make classification costly. */
+export const MAX_GLOBS = 1_000;
+export const MAX_GLOB_LENGTH = 200;
+
+/** Why a classes response cannot be used, or `null`. */
+export function classesProblem(
+  classes: readonly { name: string; globs: readonly string[] }[],
+): string | null {
+  if (new Set(classes.map((c) => c.name)).size !== classes.length) return 'a class is listed twice';
+  const globs = classes.flatMap((c) => c.globs);
+  if (globs.length > MAX_GLOBS) return `more than ${MAX_GLOBS} globs`;
+  if (globs.some((g) => g.length === 0 || g.length > MAX_GLOB_LENGTH)) {
+    return `a glob is empty or longer than ${MAX_GLOB_LENGTH} characters`;
+  }
+  return null;
+}
+
 export function createServerClient(baseUrl: string, fetchImpl: Fetch = fetch): ServerClient {
   const base = baseUrl.replace(/\/+$/, '');
 
@@ -66,6 +83,8 @@ export function createServerClient(baseUrl: string, fetchImpl: Fetch = fetch): S
       if (body instanceof type.errors) {
         throw new ServerError(`invalid classes response: ${body.summary}`, res.status);
       }
+      const problem = classesProblem(body.classes);
+      if (problem) throw new ServerError(`invalid classes response: ${problem}`, res.status);
       return body.classes.map((c) => ({ name: c.name, globs: [...c.globs] }));
     },
     async score(payload) {

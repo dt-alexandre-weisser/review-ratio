@@ -15,6 +15,6 @@ describe('Cloudflare Workers entry', () => {
       body: JSON.stringify(anchor.payload),
     });
     expect(res.status).toBe(200);
-    expect(res.headers.get('ratelimit-limit')).toBe('120');
+    expect(res.headers.get('ratelimit-limit')).toBe('600');
   });
 });
