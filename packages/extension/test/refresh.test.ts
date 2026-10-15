@@ -104,6 +104,28 @@ describe('refresh', () => {
     expect(cache).toMatchObject({ status: 'ok', unfinishedRefreshes: 0 });
   });
 
+  it('stops and blames the server when its class globs are too expensive', async () => {
+    const srv = server({
+      fetchClasses: () =>
+        Promise.resolve([
+          { name: 'docs' as const, globs: Array.from({ length: 400 }, (_, i) => `**/*${i}*.md`) },
+        ]),
+    });
+    const { deps } = await setup({ server: srv });
+    const realNow = performance.now.bind(performance);
+    let shift = 0;
+    const spy = vi.spyOn(performance, 'now').mockImplementation(() => realNow() + (shift += 50));
+    try {
+      const cache = await refresh(deps);
+      expect(cache).toMatchObject({
+        status: 'stale',
+        error: expect.stringContaining('class globs'),
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('does nothing but flag the badge without a token', async () => {
     const { deps, srv, store } = await setup({ token: '' });
     await store.updateBadge({ unfinishedRefreshes: 1 });

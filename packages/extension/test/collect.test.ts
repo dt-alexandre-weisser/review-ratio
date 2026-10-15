@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createClassifier } from '../src/lib/classify.ts';
+import { ClassificationBudgetError, createClassifier } from '../src/lib/classify.ts';
 import {
   collectWindow,
   isFatal,
@@ -52,9 +52,10 @@ describe('helpers', () => {
     ]);
   });
 
-  it('treats auth and rate-limit errors as fatal only', () => {
+  it('treats auth, rate-limit and classification-budget errors as fatal only', () => {
     expect(isFatal(new GitHubAuthError(401))).toBe(true);
     expect(isFatal(new GitHubRateLimitError(null))).toBe(true);
+    expect(isFatal(new ClassificationBudgetError())).toBe(true);
     expect(isFatal(new GitHubError('boom', 502))).toBe(false);
     expect(isFatal(new Error('x'))).toBe(false);
   });

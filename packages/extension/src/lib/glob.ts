@@ -7,10 +7,12 @@
  * segments by dynamic programming over (pattern segment, path segment). Braces are expanded up
  * front, with a cap.
  *
- * Supported syntax, the subset the published globs use, with picomatch's meaning under
- * `{ dot: true }`: `*`, `?`, `**` as a whole segment (zero or more segments, dot segments
- * included; elsewhere `**` acts as `*`), `[...]` classes with ranges and `^` negation,
- * `{a,b}` alternatives (nestable), and `\` escapes. Matching is case-sensitive.
+ * Supported syntax, with picomatch's meaning under `{ dot: true }`: `*`, `?`, `**` as a whole
+ * segment (zero or more segments; a trailing `/**` right after a `*` needs at least one),
+ * `[...]` classes with ranges and `^` negation, `{a,b}` alternatives (nestable), and `\`
+ * escapes. Matching is case-sensitive. `unsupportedSyntax` names everything else, which
+ * picomatch reads in ways this matcher does not reproduce: `**` inside a segment, `(`, `)`, `|`,
+ * a leading `!`, `{1..9}` ranges, and wildcards inside `{}` alternatives.
  */
 
 type Token =
@@ -22,7 +24,53 @@ type Token =
 type Segment = { kind: 'globstar' } | { kind: 'tokens'; tokens: Token[] };
 
 /** One brace alternative of a glob, split into segments. */
-export type CompiledPattern = Segment[];
+export interface CompiledPattern {
+  segments: Segment[];
+  /**
+   * The glob ends with a star followed by a trailing globstar segment (like `test*` then `/**`):
+   * picomatch then requires at least one segment for that trailing `**`, so such a glob does not
+   * match the file `testing.py`.
+   */
+  trailingNeedsSegment: boolean;
+}
+
+/** Why a glob uses syntax this matcher does not support, or `null`. */
+export function unsupportedSyntax(glob: string): string | null {
+  if (glob.startsWith('!')) return 'negated globs (leading !) are not supported';
+  if (/[()|]/.test(glob)) return 'groups and alternation with ( ) | are not supported';
+  if (/\{[^{}]*\.\.[^{}]*\}/.test(glob)) return 'brace ranges such as {1..9} are not supported';
+  if (wildcardInsideBraces(glob)) return 'wildcards inside {} alternatives are not supported';
+  for (const alternative of expandBraces(glob, 1_000)) {
+    if (alternative.split('/').some((segment) => segment.includes('**') && segment !== '**')) {
+      return '** is only supported as a whole path segment';
+    }
+  }
+  return null;
+}
+
+/** Whether an unescaped `*`, `?` or `[` sits inside braces (picomatch lets such a `*` cross `/`). */
+function wildcardInsideBraces(glob: string): boolean {
+  let depth = 0;
+  for (let i = 0; i < glob.length; i += 1) {
+    const c = glob[i];
+    if (c === '\\') i += 1;
+    else if (c === '{') depth += 1;
+    else if (c === '}') depth = Math.max(0, depth - 1);
+    else if (depth > 0 && (c === '*' || c === '?' || c === '[')) return true;
+  }
+  return false;
+}
+
+/** Whether the glob text ends with one or more globstar segments right after an unescaped star. */
+function endsWithStarThenGlobstar(glob: string): boolean {
+  let end = glob.length;
+  while (glob.slice(0, end).endsWith('/**')) end -= 3;
+  if (end === glob.length || glob[end - 1] !== '*') return false;
+  // Count the backslashes before that star: an odd number escapes it.
+  let slashes = 0;
+  for (let i = end - 2; i >= 0 && glob[i] === '\\'; i -= 1) slashes += 1;
+  return slashes % 2 === 0;
+}
 
 export class GlobError extends Error {
   constructor(message: string) {
@@ -149,14 +197,16 @@ function parseClass(segment: string, open: number): { token: Token; end: number 
 
 /** Compiles a glob into its brace alternatives. */
 export function compileGlob(glob: string, maxAlternatives = 64): CompiledPattern[] {
-  return expandBraces(glob, maxAlternatives).map((alternative) =>
-    alternative
+  const trailingNeedsSegment = endsWithStarThenGlobstar(glob);
+  return expandBraces(glob, maxAlternatives).map((alternative) => ({
+    trailingNeedsSegment,
+    segments: alternative
       .replace(/^\.\//, '')
       .split('/')
       .map((segment): Segment =>
         segment === '**' ? { kind: 'globstar' } : { kind: 'tokens', tokens: tokenize(segment) },
       ),
-  );
+  }));
 }
 
 function matchesChar(token: Token, c: string): boolean {
@@ -213,30 +263,41 @@ function matchPart(tokens: readonly Token[], part: string): boolean {
 
 /** Whether a path, split into segments, matches one compiled pattern. */
 export function matchPattern(pattern: CompiledPattern, parts: readonly string[]): boolean {
+  const { segments } = pattern;
   // Cheap rejects first: most globs fail on the file name, the last segment.
-  const last = pattern.at(-1);
+  const last = segments.at(-1);
   if (last?.kind === 'tokens' && !matchPart(last.tokens, parts.at(-1) ?? '')) return false;
-  if (!pattern.some((segment) => segment.kind === 'globstar')) {
-    if (pattern.length !== parts.length) return false;
-    return pattern.every(
+  if (!segments.some((segment) => segment.kind === 'globstar')) {
+    if (segments.length !== parts.length) return false;
+    return segments.every(
       (segment, j) => segment.kind === 'tokens' && matchPart(segment.tokens, parts[j] ?? ''),
     );
   }
+  // The first globstar of the trailing run, when it must consume at least one segment.
+  let firstTrailing = segments.length;
+  while (firstTrailing > 0 && segments[firstTrailing - 1]?.kind === 'globstar') firstTrailing -= 1;
+  const needsOne = pattern.trailingNeedsSegment ? firstTrailing : -1;
+
   // reachable[j]: the pattern segments seen so far can consume exactly the first j path segments.
   let reachable = new Uint8Array(parts.length + 1);
   reachable[0] = 1;
-  for (const segment of pattern) {
+  for (const [index, segment] of segments.entries()) {
     const next = new Uint8Array(parts.length + 1);
     let any = false;
     if (segment.kind === 'globstar') {
-      // Zero or more segments from any reachable position, stopping at `.` and `..`.
+      // Zero or more segments from any reachable position (one or more for `needsOne`),
+      // stopping at `.` and `..`.
+      const min = index === needsOne ? 1 : 0;
+      // open: some reachable start lies before j (at or before j when zero segments are allowed)
+      // with no `.` or `..` segment in between. Linear in the number of path segments.
       let open = false;
       for (let j = 0; j <= parts.length; j += 1) {
-        if (reachable[j]) open = true;
+        if (min === 0 && reachable[j]) open = true;
         if (open) {
           next[j] = 1;
           any = true;
         }
+        if (min === 1 && reachable[j]) open = true;
         if (isDotSegment(parts[j])) open = false;
       }
     } else {

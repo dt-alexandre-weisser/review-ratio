@@ -54,10 +54,15 @@ point to tune; changing them never breaks the contract.
   `docs`, `chore`, `tooling`, `config`. A path that matches nothing is `production`.
 - Matching is case-sensitive, like Git, and always uses `/`. The extension matches with its own
   glob matcher (`packages/extension/src/lib/glob.ts`), not regular expressions: compiled to
-  regular expressions, a crafted server glob backtracked for seconds per path. The matcher agrees
-  with picomatch (`{ dot: true }`) on every published glob and on 200,000 fuzzed cases; the one
-  known difference is a path segment literally named like a brace pattern, which picomatch also
-  matches as text. A refresh spends at most 5 seconds classifying, whatever the globs.
+  regular expressions, a crafted server glob backtracked for seconds per path.
+- The matcher supports `*`, `?`, `**` as a whole segment, `[...]` classes, `{a,b}` alternatives
+  without wildcards inside, and `\` escapes. The server's globs are refused when they use anything
+  else (`**` inside a segment, `( ) |`, a leading `!`, `{1..9}`, wildcards inside braces): picomatch
+  reads those in ways that are hard to reproduce, and inconsistently. Within the supported syntax
+  the matcher agrees with picomatch (`{ dot: true }`) on every published glob and on 50,000
+  fuzzed globs over realistic Git paths, a test that runs in CI.
+- A refresh spends at most 5 seconds classifying, whatever the globs; past that it stops and the
+  badge reports a server problem.
 - `scripts/`, `tools/` and `bin/` are tooling at the repository root or at the top of a monorepo
   package only: `src/agent/tools/` is production code.
 - `*Test.*` is a test only in languages that name tests that way (C#, Java, Kotlin…): `ABTest.tsx`
@@ -173,20 +178,20 @@ question below.
 
 ### Limits
 
-| Limit                               | Value                                                                | Why                                                           |
-| ----------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- |
-| ↑ records per payload               | 500, newest kept                                                     | A week of one person never needs more                         |
-| ↓ records per payload               | 200, newest kept                                                     |                                                               |
-| Lines per class per record          | 1,000,000, clamped                                                   | One huge data file must not break the badge                   |
-| Request body                        | 512 KiB                                                              | The largest valid payload fits                                |
-| Validation problems echoed          | 10                                                                   | Keeps error answers small                                     |
-| Keys per object, array items, depth | 32, 1,000, 8                                                         | Rejected cheaply, before schema validation                    |
-| Failed records validated            | 10                                                                   | An invalid payload is rejected in milliseconds                |
-| Published globs                     | 1,000; 200 characters each; 2,000 patterns after braces; 32 segments | No regular expressions; 5 s classification budget per refresh |
-| `POST /score` per client            | 600 per 10 minutes, configurable                                     | Room for an office behind one address                         |
-| GitHub search                       | 1,000 results per query                                              | GitHub's own cap                                              |
-| Reviews read per PR                 | 100 (all of mine)                                                    | One GraphQL page; mine are paginated                          |
-| Review comments read                | 100 per review                                                       | One GraphQL page                                              |
+| Limit                               | Value                                                              | Why                                                           |
+| ----------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------- |
+| ↑ records per payload               | 500, newest kept                                                   | A week of one person never needs more                         |
+| ↓ records per payload               | 200, newest kept                                                   |                                                               |
+| Lines per class per record          | 1,000,000, clamped                                                 | One huge data file must not break the badge                   |
+| Request body                        | 512 KiB                                                            | The largest valid payload fits                                |
+| Validation problems echoed          | 10                                                                 | Keeps error answers small                                     |
+| Keys per object, array items, depth | 32, 1,000, 8                                                       | Rejected cheaply, before schema validation                    |
+| Failed records validated            | 10                                                                 | An invalid payload is rejected in milliseconds                |
+| Published globs                     | 500; 200 characters each; 1,000 patterns after braces; 16 segments | No regular expressions; 5 s classification budget per refresh |
+| `POST /score` per client            | 600 per 10 minutes, configurable                                   | Room for an office behind one address                         |
+| GitHub search                       | 1,000 results per query                                            | GitHub's own cap                                              |
+| Reviews read per PR                 | 100 (all of mine)                                                  | One GraphQL page; mine are paginated                          |
+| Review comments read                | 100 per review                                                     | One GraphQL page                                              |
 
 ### Errors
 

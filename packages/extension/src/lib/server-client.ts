@@ -9,7 +9,7 @@ import {
   type ScoreResponseV1,
 } from '@review-ratio/contract';
 
-import { GlobError, compileGlob, type CompiledPattern } from './glob.ts';
+import { GlobError, compileGlob, unsupportedSyntax, type CompiledPattern } from './glob.ts';
 import type { PublishedClass } from './storage.ts';
 
 export class ServerError extends Error {
@@ -40,12 +40,12 @@ export interface ServerClient {
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Bounds on the published globs: the server must not be able to make classification costly. */
-export const MAX_GLOBS = 1_000;
+export const MAX_GLOBS = 500;
 export const MAX_GLOB_LENGTH = 200;
 /** Brace alternatives over all globs. */
-export const MAX_PATTERNS = 2_000;
+export const MAX_PATTERNS = 1_000;
 /** Path segments per pattern. */
-export const MAX_SEGMENTS = 32;
+export const MAX_SEGMENTS = 16;
 
 /** Why a classes response cannot be used, or `null`. */
 export function classesProblem(
@@ -62,10 +62,12 @@ export function classesProblem(
     let compiled: CompiledPattern[];
     try {
       compiled = compileGlob(glob);
+      const unsupported = unsupportedSyntax(glob);
+      if (unsupported) return `${glob}: ${unsupported}`;
     } catch (error) {
       return error instanceof GlobError ? `${glob}: ${error.message}` : 'a glob cannot be read';
     }
-    if (compiled.some((pattern) => pattern.length > MAX_SEGMENTS)) {
+    if (compiled.some((pattern) => pattern.segments.length > MAX_SEGMENTS)) {
       return `a glob has more than ${MAX_SEGMENTS} path segments`;
     }
     patterns += compiled.length;

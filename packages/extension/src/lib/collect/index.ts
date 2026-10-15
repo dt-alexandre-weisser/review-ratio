@@ -5,7 +5,7 @@
  * refresh fails only on an auth or rate-limit error, or when most PRs fail, which points at
  * GitHub itself.
  */
-import type { Classifier } from '../classify.ts';
+import { ClassificationBudgetError, type Classifier } from '../classify.ts';
 import {
   GitHubAuthError,
   GitHubError,
@@ -77,7 +77,11 @@ export function searchQueries(org: string, me: string, nowMs: number): string[] 
 
 /** Errors that mean the whole refresh cannot work: stop at once instead of skipping a PR. */
 export function isFatal(error: unknown): boolean {
-  return error instanceof GitHubAuthError || error instanceof GitHubRateLimitError;
+  return (
+    error instanceof GitHubAuthError ||
+    error instanceof GitHubRateLimitError ||
+    error instanceof ClassificationBudgetError
+  );
 }
 
 export async function collectWindow(input: CollectInput): Promise<Collected> {

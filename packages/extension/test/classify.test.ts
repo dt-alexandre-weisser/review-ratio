@@ -124,6 +124,10 @@ describe('classification budget', () => {
     expect(() => {
       for (let i = 0; i < 10; i += 1) classify(`f${i}.ts`);
     }).toThrow(ClassificationBudgetError);
+    // Spent for the whole refresh: even a cached-free cheap path now fails at once.
+    const before = calls;
+    expect(() => classify('another.ts')).toThrow(ClassificationBudgetError);
+    expect(calls).toBe(before);
   });
 
   it('classifies a thousand paths quickly with the published globs, even instrumented', () => {

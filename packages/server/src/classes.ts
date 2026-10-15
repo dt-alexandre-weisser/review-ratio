@@ -9,9 +9,10 @@ import type { FileClass } from '@review-ratio/contract';
  *
  * Globs use picomatch syntax with `{ dot: true }`, case-sensitive, against the repository-relative
  * path; case-sensitive on purpose, so `*Test.*` never matches `latest.ts`. The extension matches
- * them with its own matcher, which supports `*`, `?`, `**`, `[...]`, `{a,b}` and `\` escapes only:
- * do not publish extglobs or ranges such as `{1..9}`. Its bounds (packages/extension/src/lib/
- * server-client.ts) cap the number, length and brace expansion of the globs.
+ * them with its own matcher and refuses any other syntax than `*`, `?`, `**` as a whole segment,
+ * `[...]`, `{a,b}` without wildcards inside, and `\` escapes. Its bounds
+ * (packages/extension/src/lib/server-client.ts) also cap the number, length and brace expansion
+ * of the globs. The extension's tests check every glob here against those rules.
  */
 export interface PublishedClass {
   name: FileClass;

@@ -45,6 +45,7 @@ export function createClassifier(
   return (path) => {
     const cached = cache.get(path);
     if (cached) return cached;
+    if (spent > budgetMs) throw new ClassificationBudgetError();
     const started = now();
     const parts = splitPath(path);
     let result: FileClass = 'production';
@@ -54,7 +55,11 @@ export function createClassifier(
           result = cls.name;
           break search;
         }
-        if (spent + now() - started > budgetMs) throw new ClassificationBudgetError();
+        if (spent + now() - started > budgetMs) {
+          // Spent for good: every later path of this refresh fails at once.
+          spent = Number.POSITIVE_INFINITY;
+          throw new ClassificationBudgetError();
+        }
       }
     }
     spent += now() - started;

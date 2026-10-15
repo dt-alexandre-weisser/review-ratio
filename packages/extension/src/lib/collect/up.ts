@@ -17,8 +17,10 @@
  *   snapshot taken while that commit was still the PR head.
  * - `waitedHoursWithoutReview` is set when my review is the first review by a human who does
  *   not own the PR since it first became ready for review. The wait counts the time the PR was
- *   ready, not its draft periods. Reviews of the draft before it first became ready do not count,
- *   and do not keep the credit of a commit from a review made once it was ready.
+ *   ready, not its draft periods; reviews of the draft before it first became ready do not count.
+ *   An equally strong review made once the PR was ready takes a commit's credit from a review of
+ *   the draft, and the rescue goes with that credit. When a stronger review of the draft keeps
+ *   the credit, the rescue stays on the first review.
  */
 import type { LinesByClassV1, ReviewActionV1 } from '@review-ratio/contract';
 
