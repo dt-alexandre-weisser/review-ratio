@@ -31,6 +31,7 @@ function pullRequest(number: number, author: string, reviews: FakeReview[]) {
     author: { login: author, __typename: 'User' },
     assignees: { nodes: [] },
     timelineItems: { nodes: [] },
+    firstStateEvent: { nodes: [] },
     commits: { nodes: [{ commit: { parents: { nodes: [{ oid: 'fork' }] } } }] },
     files: {
       pageInfo: { hasNextPage: false, endCursor: null },

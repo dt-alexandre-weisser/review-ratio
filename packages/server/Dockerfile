@@ -29,9 +29,10 @@ RUN pnpm --filter @review-ratio/server build:node
 
 FROM node:22.22.0-alpine@sha256:e4bf2a82ad0a4037d28035ae71529873c069b13eb0455466ae0bc13363826e34 AS runtime
 # No package manager at runtime (npm, yarn, corepack, apk): less to patch, nothing to install with.
+# /lib/apk/db stays: image scanners read the list of installed Alpine packages from it.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
       /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn \
-      /usr/local/bin/yarnpkg /sbin/apk /etc/apk /lib/apk /usr/share/apk /var/cache/apk
+      /usr/local/bin/yarnpkg /sbin/apk /var/cache/apk
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8080

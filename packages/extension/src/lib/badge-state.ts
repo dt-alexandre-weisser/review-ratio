@@ -99,11 +99,12 @@ export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
 }
 
 /**
- * Whether the score shown is out of date: the last refresh failed, or a refresh started and
- * never finished (a service worker killed mid-refresh leaves the status `ok`). A refresh that is
- * merely running does not grey the badge.
+ * Whether the score shown is out of date: the last refresh failed, a refresh that started never
+ * finished (a service worker killed mid-refresh leaves the status `ok`), or the current refresh
+ * follows one that died. A refresh that is merely running does not grey the badge.
  */
 export function isStale(cache: BadgeCache, nowMs: number): boolean {
   if (cache.status === 'stale' || cache.status === 'github_error') return true;
+  if (cache.unfinishedRefreshes > 1) return true;
   return cache.refreshStartedAt !== null && nowMs - cache.refreshStartedAt > REFRESH_LOCK_MS;
 }

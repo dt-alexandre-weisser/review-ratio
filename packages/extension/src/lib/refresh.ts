@@ -61,7 +61,13 @@ export async function refresh(deps: RefreshDeps): Promise<BadgeCache> {
   }
 
   const startedAt = deps.now();
-  await store.updateBadge({ refreshStartedAt: startedAt, attemptedAt: startedAt, notBefore: null });
+  const before = await store.getBadge();
+  await store.updateBadge({
+    refreshStartedAt: startedAt,
+    attemptedAt: startedAt,
+    notBefore: null,
+    unfinishedRefreshes: before.unfinishedRefreshes + 1,
+  });
 
   try {
     const urlProblem = serverUrlProblem(settings.serverUrl);
@@ -97,11 +103,17 @@ export async function refresh(deps: RefreshDeps): Promise<BadgeCache> {
       error:
         collected.skipped > 0 ? `${collected.skipped} pull request(s) could not be read` : null,
       refreshStartedAt: null,
+      unfinishedRefreshes: 0,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     deps.log?.(`refresh failed: ${message}`);
-    return store.updateBadge({ ...failure(error), error: message, refreshStartedAt: null });
+    return store.updateBadge({
+      ...failure(error),
+      error: message,
+      refreshStartedAt: null,
+      unfinishedRefreshes: 0,
+    });
   }
 }
 

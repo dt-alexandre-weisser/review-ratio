@@ -52,7 +52,26 @@ export function classesProblem(
   if (globs.some((g) => g.length === 0 || g.length > MAX_GLOB_LENGTH)) {
     return `a glob is empty or longer than ${MAX_GLOB_LENGTH} characters`;
   }
+  if (globs.some((g) => !isBoundedGlob(g))) {
+    return `a glob has more than ${MAX_STARS} *, ${MAX_GLOBSTARS} ** or ${MAX_BRACES} {} groups`;
+  }
   return null;
+}
+
+/**
+ * Wildcards compile to lazy regular-expression loops that backtrack against each other: a few
+ * `*` in one glob can take seconds, then minutes, on a long path. Within these bounds, which the
+ * published globs fit, the worst case measured stays around 10 ms.
+ */
+export const MAX_STARS = 2;
+export const MAX_GLOBSTARS = 3;
+export const MAX_BRACES = 2;
+
+export function isBoundedGlob(glob: string): boolean {
+  const globstars = glob.match(/\*\*/g)?.length ?? 0;
+  const stars = glob.replace(/\*\*/g, '').match(/\*/g)?.length ?? 0;
+  const braces = glob.match(/\{/g)?.length ?? 0;
+  return stars <= MAX_STARS && globstars <= MAX_GLOBSTARS && braces <= MAX_BRACES;
 }
 
 export function createServerClient(baseUrl: string, fetchImpl: Fetch = fetch): ServerClient {

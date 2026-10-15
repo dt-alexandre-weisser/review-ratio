@@ -63,4 +63,14 @@ describe('networkKey', () => {
     expect(networkKey('fe80::1%eth0')).toBe('fe80:0:0:0::/64');
     expect(networkKey('2001:0DB8:0001:0002:ffff::')).toBe('2001:db8:1:2::/64');
   });
+
+  it('keys every IPv6 spelling of an IPv4 address, and ports, by the IPv4 address', () => {
+    expect(networkKey('::ffff:c000:280')).toBe('192.0.2.128');
+    expect(networkKey('::FFFF:192.0.2.128')).toBe('192.0.2.128');
+    expect(networkKey('::192.0.2.128')).toBe('192.0.2.128');
+    expect(networkKey('192.0.2.128:5678')).toBe('192.0.2.128');
+    expect(networkKey('[2001:db8:1:2::1]:443')).toBe('2001:db8:1:2::/64');
+    expect(networkKey('::1')).toBe('0:0:0:0::/64');
+    expect(networkKey('garbage:::')).toBe('garbage:::');
+  });
 });

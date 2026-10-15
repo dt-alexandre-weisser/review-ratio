@@ -112,12 +112,15 @@ question below.
 
 - A PR is mine when I authored it, or when it is a `github-actions` PR assigned to me. I earn no ↑
   on a PR that is mine, even when GitHub lets me approve it.
-- `waitedHoursWithoutReview` is non-zero only when my review is the first review submitted after
-  the PR was marked ready, by a human who does not own it. Reviews of the draft do not count, and a
-  PR still in draft was not waiting at all. The wait is measured from ready-for-review to that
+- `waitedHoursWithoutReview` is non-zero only when my review is the first review by a human who
+  does not own the PR since it first became ready: at creation when it was opened ready, at its
+  first ready-for-review event when it was opened as a draft. Reviews of the draft before that do
+  not count, a PR that never was ready was not waiting, and converting a PR back to draft later
+  does not take an earned rescue away. The wait is measured from that first ready moment to the
   first review, rounded up, so the server's "more than 48 hours" test is exact. When my first
-  review is a comment followed by an approval of the same commit, the rescue goes to the approval,
-  with the covered lines.
+  review is a comment followed by an approval of the same commit, the rescue goes with the
+  covered lines to the approval; it stays on the first review when the credited review is an
+  earlier review of the draft.
 
 ### ↓ side
 
@@ -146,8 +149,10 @@ question below.
   hour. Times left in the future by a clock change are ignored.
 - Refreshes run one at a time. A refresh forced from the options page runs after the one in
   progress, so it always uses the settings just saved.
-- A refresh marks its start in storage. Another may start only after 3 minutes, which covers a
-  service worker killed mid-refresh; the score is then shown greyed. While a refresh runs, the
+- A refresh marks its start in storage, and counts refreshes that started without finishing.
+  Another may start only after 5 minutes, which covers a service worker killed mid-refresh. The
+  score is shown greyed when a refresh has run for more than 5 minutes, or when the current one
+  follows a refresh that died; a refresh that is merely running does not grey it. While a refresh runs, the
   worker calls a cheap extension API every 20 seconds so Chrome does not stop it for idleness, and
   each GitHub request times out after 25 seconds, under Chrome's 30-second limit.
 
@@ -164,20 +169,20 @@ question below.
 
 ### Limits
 
-| Limit                               | Value                            | Why                                            |
-| ----------------------------------- | -------------------------------- | ---------------------------------------------- |
-| ↑ records per payload               | 500, newest kept                 | A week of one person never needs more          |
-| ↓ records per payload               | 200, newest kept                 |                                                |
-| Lines per class per record          | 1,000,000, clamped               | One huge data file must not break the badge    |
-| Request body                        | 512 KiB                          | The largest valid payload fits                 |
-| Validation problems echoed          | 10                               | Keeps error answers small                      |
-| Keys per object, array items, depth | 32, 1,000, 8                     | Rejected cheaply, before schema validation     |
-| Failed records validated            | 10                               | An invalid payload is rejected in milliseconds |
-| Published globs                     | 1,000, 200 characters each       | The server cannot make classification costly   |
-| `POST /score` per client            | 600 per 10 minutes, configurable | Room for an office behind one address          |
-| GitHub search                       | 1,000 results per query          | GitHub's own cap                               |
-| Reviews read per PR                 | 100 (all of mine)                | One GraphQL page; mine are paginated           |
-| Review comments read                | 100 per review                   | One GraphQL page                               |
+| Limit                               | Value                                                   | Why                                             |
+| ----------------------------------- | ------------------------------------------------------- | ----------------------------------------------- |
+| ↑ records per payload               | 500, newest kept                                        | A week of one person never needs more           |
+| ↓ records per payload               | 200, newest kept                                        |                                                 |
+| Lines per class per record          | 1,000,000, clamped                                      | One huge data file must not break the badge     |
+| Request body                        | 512 KiB                                                 | The largest valid payload fits                  |
+| Validation problems echoed          | 10                                                      | Keeps error answers small                       |
+| Keys per object, array items, depth | 32, 1,000, 8                                            | Rejected cheaply, before schema validation      |
+| Failed records validated            | 10                                                      | An invalid payload is rejected in milliseconds  |
+| Published globs                     | 1,000; each up to 200 characters, 2 `*`, 3 `**`, 2 `{}` | Matching stays around 10 ms, even on long paths |
+| `POST /score` per client            | 600 per 10 minutes, configurable                        | Room for an office behind one address           |
+| GitHub search                       | 1,000 results per query                                 | GitHub's own cap                                |
+| Reviews read per PR                 | 100 (all of mine)                                       | One GraphQL page; mine are paginated            |
+| Review comments read                | 100 per review                                          | One GraphQL page                                |
 
 ### Errors
 

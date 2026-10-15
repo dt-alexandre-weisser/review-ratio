@@ -538,3 +538,60 @@ describe('upRecordsForPullRequest: second-review fixes', () => {
     expect(records[0]!.waitedHoursWithoutReview).toBe(55);
   });
 });
+
+describe('upRecordsForPullRequest: rescue and the draft lifecycle', () => {
+  it('keeps the rescue on my post-ready review when the credit stayed on a draft review', async () => {
+    // I approved the draft, the PR was marked ready, waited 60 h, then I approved the same commit.
+    const records = await upRecordsForPullRequest(
+      pr({
+        createdAt: hoursAgo(200),
+        readyForReviewAt: hoursAgo(100),
+        firstReadyAt: hoursAgo(100),
+        myReviews: [
+          review({ id: 'draft', submittedAt: hoursAgo(150) }),
+          review({ id: 'ready', submittedAt: hoursAgo(40) }),
+        ],
+      }),
+      ctx().context,
+    );
+    expect(records.map((r) => [r.reviewId, r.waitedHoursWithoutReview])).toEqual([
+      ['draft', 0],
+      ['ready', 60],
+    ]);
+  });
+
+  it('keeps an earned rescue when the PR is converted to draft afterwards', async () => {
+    const records = await upRecordsForPullRequest(
+      pr({
+        isDraft: true,
+        createdAt: hoursAgo(120),
+        firstReadyAt: hoursAgo(120),
+        myReviews: [review({ submittedAt: hoursAgo(60) })],
+      }),
+      ctx().context,
+    );
+    expect(records[0]!.waitedHoursWithoutReview).toBe(60);
+  });
+
+  it('gives no rescue when someone reviewed during an earlier ready period', async () => {
+    // Opened ready 120 h ago, reviewed by bob at 100 h, back to draft, ready again 60 h ago.
+    const records = await upRecordsForPullRequest(
+      pr({
+        createdAt: hoursAgo(120),
+        readyForReviewAt: hoursAgo(60),
+        firstReadyAt: hoursAgo(120),
+        reviews: [
+          summary({
+            id: 'bob',
+            author: { login: 'bob', type: 'User' },
+            submittedAt: hoursAgo(100),
+          }),
+          summary({ id: 'mine', author: { login: 'me', type: 'User' }, submittedAt: hoursAgo(1) }),
+        ],
+        myReviews: [review({ id: 'mine', submittedAt: hoursAgo(1) })],
+      }),
+      ctx().context,
+    );
+    expect(records[0]!.waitedHoursWithoutReview).toBe(0);
+  });
+});

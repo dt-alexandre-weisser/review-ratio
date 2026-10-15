@@ -44,6 +44,8 @@ export interface BadgeCache {
   refreshStartedAt: number | null;
   /** No refresh before this time, e.g. until GitHub's rate limit resets. */
   notBefore: number | null;
+  /** Refreshes started since the last one that finished. Above 1, refreshes keep dying. */
+  unfinishedRefreshes: number;
   /** Short description of the last failure, for the tooltip and the options page. */
   error: string | null;
 }
@@ -55,6 +57,7 @@ export const EMPTY_CACHE: Readonly<BadgeCache> = Object.freeze({
   attemptedAt: null,
   refreshStartedAt: null,
   notBefore: null,
+  unfinishedRefreshes: 0,
   error: null,
 });
 
@@ -129,6 +132,9 @@ export function coerceBadge(raw: unknown): BadgeCache {
     attemptedAt: pick('attemptedAt'),
     refreshStartedAt: pick('refreshStartedAt'),
     notBefore: pick('notBefore'),
+    unfinishedRefreshes: isCount(raw['unfinishedRefreshes'])
+      ? Math.floor(raw['unfinishedRefreshes'])
+      : 0,
     error: typeof raw['error'] === 'string' ? raw['error'] : null,
   };
 }

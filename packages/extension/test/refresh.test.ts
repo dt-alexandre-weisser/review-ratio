@@ -57,8 +57,9 @@ describe('isRefreshDue', () => {
     expect(isRefreshDue({ ...EMPTY_CACHE, attemptedAt: NOW - 9 * 60_000 }, NOW)).toBe(false);
     expect(isRefreshDue({ ...EMPTY_CACHE, attemptedAt: NOW - 10 * 60_000 }, NOW)).toBe(true);
     expect(isRefreshDue({ ...EMPTY_CACHE, refreshStartedAt: NOW - 60_000 }, NOW)).toBe(false);
+    expect(isRefreshDue({ ...EMPTY_CACHE, refreshStartedAt: NOW - 4 * 60_000 }, NOW)).toBe(false);
     // A refresh started long ago died with its worker; another may start.
-    expect(isRefreshDue({ ...EMPTY_CACHE, refreshStartedAt: NOW - 4 * 60_000 }, NOW)).toBe(true);
+    expect(isRefreshDue({ ...EMPTY_CACHE, refreshStartedAt: NOW - 6 * 60_000 }, NOW)).toBe(true);
   });
 
   it('ignores times left in the future by a clock jump', () => {
@@ -93,6 +94,14 @@ describe('refresh', () => {
       down: [],
     });
     expect(area.data['storageVersion']).toBe(STORAGE_VERSION);
+  });
+
+  it('counts refreshes that never finish, and resets the count when one does', async () => {
+    const { deps, store } = await setup();
+    // Two refreshes that died with their worker.
+    await store.updateBadge({ unfinishedRefreshes: 2 });
+    const cache = await refresh(deps);
+    expect(cache).toMatchObject({ status: 'ok', unfinishedRefreshes: 0 });
   });
 
   it('does nothing but flag the badge without a token', async () => {

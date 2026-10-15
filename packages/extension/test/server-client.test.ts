@@ -1,8 +1,10 @@
+import { PUBLISHED_CLASSES } from '@review-ratio/server';
 import { describe, expect, it } from 'vitest';
 
 import {
   MAX_GLOB_LENGTH,
   MAX_GLOBS,
+  isBoundedGlob,
   ServerError,
   UpgradeRequiredError,
   classesProblem,
@@ -90,5 +92,37 @@ describe('classesProblem', () => {
       fakeFetch(() => json({ classes: [{ name: 'docs', globs: [''] }] })),
     );
     await expect(client.fetchClasses()).rejects.toBeInstanceOf(ServerError);
+  });
+});
+
+describe('isBoundedGlob', () => {
+  it('accepts every published glob', () => {
+    for (const cls of PUBLISHED_CLASSES) {
+      for (const glob of cls.globs) expect(isBoundedGlob(glob), glob).toBe(true);
+    }
+    expect(
+      classesProblem(PUBLISHED_CLASSES.map((c) => ({ name: c.name, globs: [...c.globs] }))),
+    ).toBeNull();
+  });
+
+  it('refuses globs that backtrack exponentially', () => {
+    expect(isBoundedGlob('*a*a*a*a*a*a*a*a*a*a*a*a*b')).toBe(false);
+    expect(isBoundedGlob(Array.from({ length: 12 }, () => '*a*').join('/'))).toBe(false);
+    expect(isBoundedGlob('**/**/**/**/x')).toBe(false);
+    expect(isBoundedGlob('{a,b}{c,d}{e,f}')).toBe(false);
+    expect(isBoundedGlob('**/*.y*ml')).toBe(true);
+  });
+
+  it('keeps matching fast within the bounds, on deep and long paths', async () => {
+    const { createClassifier } = await import('../src/lib/classify.ts');
+    const classify = createClassifier([
+      { name: 'docs', globs: ['**/*a*/**/**', '*a*/**/**/b', '{a,b,c}/**/*a*/{x,y}/**'] },
+    ]);
+    const deep = `${Array.from({ length: 200 }, () => 'aaaa').join('/')}/zzz`;
+    const wide = Array.from({ length: 50 }, () => 'a'.repeat(255)).join('/');
+    const started = performance.now();
+    classify(deep);
+    classify(wide);
+    expect(performance.now() - started).toBeLessThan(500);
   });
 });

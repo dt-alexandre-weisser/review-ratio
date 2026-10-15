@@ -82,6 +82,11 @@ export interface PullRequestDetails {
   forkOid: string | null;
   /** When the PR was last marked ready for review; `null` when it never was a draft. */
   readyForReviewAt: string | null;
+  /**
+   * When the PR first became ready for review: its creation when it was opened ready, its first
+   * ready-for-review event when it was opened as a draft. `null` while it never was ready.
+   */
+  firstReadyAt: string | null;
   files: PullRequestFile[];
   /** Every review on the PR, oldest first (the first 100). */
   reviews: ReviewSummary[];

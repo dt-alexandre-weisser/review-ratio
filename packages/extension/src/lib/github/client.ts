@@ -217,6 +217,7 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
         baseRefOid: raw.baseRefOid,
         forkOid: raw.commits.nodes[0]?.commit.parents.nodes[0]?.oid ?? null,
         readyForReviewAt: raw.timelineItems.nodes.find((n) => n?.createdAt)?.createdAt ?? null,
+        firstReadyAt: firstReadyAt(raw),
         files: files.map(toFile),
         reviews: raw.reviews.nodes.map(toSummary),
         myReviews: myReviews.map(toReview),
@@ -305,6 +306,7 @@ interface RawPullRequest {
   author: RawActor | null;
   assignees: { nodes: { login: string }[] };
   timelineItems: { nodes: ({ createdAt?: string } | null)[] };
+  firstStateEvent: { nodes: ({ __typename: string; createdAt?: string } | null)[] };
   commits: { nodes: { commit: { parents: { nodes: { oid: string }[] } } }[] };
   files: Connection<RawFile>;
   reviews: { nodes: RawReviewSummary[] };
@@ -323,6 +325,17 @@ function toActor(raw: RawActor | null): Actor | null {
   if (!raw) return null;
   const type = ACTOR_TYPES.has(raw.__typename) ? (raw.__typename as ActorType) : 'User';
   return { login: raw.login, type };
+}
+
+/**
+ * When the PR first became ready, from its first draft-or-ready event: a ready-for-review event
+ * first means it was opened as a draft; a convert-to-draft event first means it was opened ready.
+ */
+function firstReadyAt(raw: RawPullRequest): string | null {
+  const first = raw.firstStateEvent.nodes[0];
+  if (first?.__typename === 'ReadyForReviewEvent') return first.createdAt ?? null;
+  if (first?.__typename === 'ConvertToDraftEvent') return raw.createdAt;
+  return raw.isDraft ? null : raw.createdAt;
 }
 
 function toFile(raw: RawFile): PullRequestFile {
@@ -376,6 +389,9 @@ export const PR_QUERY = `query PullRequest($owner: String!, $name: String!, $num
       author { login __typename }
       assignees(first: 25) { nodes { login } }
       timelineItems(itemTypes: [READY_FOR_REVIEW_EVENT], last: 1) { nodes { ... on ReadyForReviewEvent { createdAt } } }
+      firstStateEvent: timelineItems(itemTypes: [READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT], first: 1) {
+        nodes { __typename ... on ReadyForReviewEvent { createdAt } ... on ConvertToDraftEvent { createdAt } }
+      }
       commits(first: 1) { nodes { commit { parents(first: 1) { nodes { oid } } } } }
       files(first: 100) { ${FILE_FIELDS} }
       reviews(first: 100) { nodes { id state submittedAt author { login __typename } } }

@@ -52,6 +52,9 @@ function rawPr(overrides: Record<string, unknown> = {}) {
     author: { login: 'alice', __typename: 'User' },
     assignees: { nodes: [{ login: 'me' }] },
     timelineItems: { nodes: [{ createdAt: '2026-10-14T11:00:00Z' }] },
+    firstStateEvent: {
+      nodes: [{ __typename: 'ReadyForReviewEvent', createdAt: '2026-10-14T10:30:00Z' }],
+    },
     commits: { nodes: [{ commit: { parents: { nodes: [{ oid: 'fork' }] } } }] },
     files: {
       pageInfo: { hasNextPage: false, endCursor: null },
@@ -213,6 +216,7 @@ describe('createGitHubClient', () => {
       author: { login: 'alice', type: 'User' },
       assignees: ['me'],
       readyForReviewAt: '2026-10-14T11:00:00Z',
+      firstReadyAt: '2026-10-14T10:30:00Z',
       headRefOid: 'h',
       baseRefOid: 'b',
       forkOid: 'fork',
@@ -283,6 +287,9 @@ describe('createGitHubClient', () => {
             pullRequest: rawPr({
               author: { login: 'renovate', __typename: 'Bot' },
               timelineItems: { nodes: [] },
+              firstStateEvent: {
+                nodes: [{ __typename: 'ConvertToDraftEvent', createdAt: '2026-10-14T12:00:00Z' }],
+              },
               commits: { nodes: [] },
               files: {
                 ...rawPr().files,
@@ -306,6 +313,8 @@ describe('createGitHubClient', () => {
     expect(details.author).toEqual({ login: 'renovate', type: 'Bot' });
     expect(details.readyForReviewAt).toBeNull();
     expect(details.forkOid).toBeNull();
+    // Converted to draft first: it was opened ready, so it became ready at creation.
+    expect(details.firstReadyAt).toBe('2026-10-14T10:00:00Z');
   });
 
   it('recognises an exhausted GraphQL budget, which GitHub answers with 200', async () => {
@@ -368,5 +377,23 @@ describe('createGitHubClient', () => {
       fetchImpl: fakeFetch(() => json({}, { status: 500 })),
     });
     await expect(failing.compare('o', 'r', 'a', 'b')).rejects.toBeInstanceOf(GitHubError);
+  });
+});
+
+describe('firstReadyAt', () => {
+  it('is null for a draft that was never ready, and the creation time for a PR opened ready', async () => {
+    const read = async (overrides: Record<string, unknown>) => {
+      const client = createGitHubClient({
+        token: 't',
+        fetchImpl: fakeFetch(() =>
+          json({ data: { repository: { pullRequest: rawPr(overrides) } } }),
+        ),
+      });
+      return (await client.pullRequest('o', 'r', 1, 'me')).firstReadyAt;
+    };
+    expect(await read({ isDraft: true, firstStateEvent: { nodes: [] } })).toBeNull();
+    expect(await read({ isDraft: false, firstStateEvent: { nodes: [] } })).toBe(
+      '2026-10-14T10:00:00Z',
+    );
   });
 });

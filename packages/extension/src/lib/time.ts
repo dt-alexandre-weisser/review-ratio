@@ -5,8 +5,11 @@ export const DAY_MS = 24 * HOUR_MS;
 export const WINDOW_MS = 7 * DAY_MS;
 /** The badge refreshes at most this often. */
 export const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
-/** A refresh older than this is considered dead and another one may start. */
-export const REFRESH_LOCK_MS = 3 * 60 * 1000;
+/**
+ * A refresh older than this is considered dead and another one may start. Chrome stops a
+ * service worker whose single request runs past 5 minutes.
+ */
+export const REFRESH_LOCK_MS = 5 * 60 * 1000;
 
 export function hoursBetween(fromMs: number, toMs: number): number {
   return (toMs - fromMs) / HOUR_MS;

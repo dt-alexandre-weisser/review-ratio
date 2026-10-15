@@ -16,7 +16,8 @@
  * - The Viewed bonus covers the files of the credited range that I marked Viewed, from a
  *   snapshot taken while that commit was still the PR head.
  * - `waitedHoursWithoutReview` is set when my review is the first review by a human who does
- *   not own the PR, after it was marked ready for review. Draft time never counts as waiting.
+ *   not own the PR since it first became ready for review. A PR that never was ready was not
+ *   waiting; reviews of the draft before that do not count.
  */
 import type { LinesByClassV1, ReviewActionV1 } from '@review-ratio/contract';
 
@@ -25,7 +26,7 @@ import { normalizeLogin } from '../github/client.ts';
 import type { CompareFile, PullRequestDetails, Review, ReviewSummary } from '../github/types.ts';
 import type { ViewedSnapshot } from '../storage.ts';
 import { WINDOW_MS, hoursBetween, parseIso } from '../time.ts';
-import { isOwnedByMe, ownersOf, readyAtOf } from './down.ts';
+import { isOwnedByMe, ownersOf } from './down.ts';
 import type { UpInput } from './types.ts';
 
 export const COMMENT_RANGE_CAP = 20;
@@ -175,10 +176,17 @@ function rangesOf(mine: readonly Mine[]): Range[] {
   return [...ranges.values()];
 }
 
-/** Hours from ready-for-review to the first review. */
-function waitedHours(pr: PullRequestDetails, firstId: string, readyAtMs: number): number {
-  const at = pr.reviews.find((r) => r.id === firstId)?.submittedAt;
-  return at ? Math.max(0, hoursBetween(readyAtMs, parseIso(at))) : 0;
+/** The first review since the PR first became ready, and how long the PR waited for it. */
+function rescueOf(
+  pr: PullRequestDetails,
+): { id: string; atMs: number; waitedHours: number } | null {
+  if (pr.firstReadyAt === null) return null;
+  const readyMs = parseIso(pr.firstReadyAt);
+  const id = firstReviewId(pr.reviews, ownersOf(pr), readyMs);
+  const at = pr.reviews.find((r) => r.id === id)?.submittedAt;
+  if (id === null || !at) return null;
+  const atMs = parseIso(at);
+  return { id, atMs, waitedHours: Math.max(0, hoursBetween(readyMs, atMs)) };
 }
 
 export async function upRecordsForPullRequest(
@@ -209,14 +217,16 @@ export async function upRecordsForPullRequest(
     ),
   );
 
-  // A PR still in draft, never marked ready, was not waiting for anyone.
-  const readyAtMs = readyAtOf(pr);
-  const waiting = !(pr.isDraft && pr.readyForReviewAt === null);
-  const firstId = waiting ? firstReviewId(pr.reviews, ownersOf(pr), readyAtMs) : null;
-  // When the first review is one of mine on a reviewed commit, the rescue goes with the credit.
+  // When the first review is one of mine on a reviewed commit, the rescue goes with that
+  // range's credit, provided the credited review is not an earlier review of the draft.
+  const rescue = rescueOf(pr);
+  const creditedForRescue = allRanges.find(
+    (r) => rescue !== null && r.members.has(rescue.id),
+  )?.credited;
   const rescuedId =
-    allRanges.find((r) => firstId !== null && r.members.has(firstId))?.credited.review.id ??
-    firstId;
+    creditedForRescue && rescue && creditedForRescue.tMs >= rescue.atMs
+      ? creditedForRescue.review.id
+      : (rescue?.id ?? null);
 
   const viewedNow = new Set(
     pr.files.filter((f) => f.viewerViewedState === 'VIEWED').map((f) => f.path),
@@ -250,8 +260,7 @@ export async function upRecordsForPullRequest(
         ctx.classify,
       ),
       viewedLinesByClass: viewed,
-      waitedHoursWithoutReview:
-        firstId !== null && rescuedId === review.id ? waitedHours(pr, firstId, readyAtMs) : 0,
+      waitedHoursWithoutReview: rescue !== null && rescuedId === review.id ? rescue.waitedHours : 0,
     });
   }
   return records;

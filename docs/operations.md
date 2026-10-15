@@ -48,7 +48,8 @@ docker run --rm -p 8080:8080 -e TRUSTED_PROXY_HOPS=0 review-ratio-server
 ```
 
 The image runs one self-contained bundle, with source maps, as the unprivileged `node` user on
-root-owned code. It has no package manager and a health check on `/health`. The base image is
+root-owned code. It has no package manager (npm, yarn, corepack and apk are removed; the Alpine
+package database stays, for image scanners) and a health check on `/health`. The base image is
 pinned by digest in the `FROM` lines; Dependabot proposes updates. On Cloud Run, set
 `TRUSTED_PROXY_HOPS=1`.
 

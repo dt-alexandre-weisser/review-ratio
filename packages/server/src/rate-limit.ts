@@ -36,28 +36,52 @@ export function forwardedClientIp(
   return ip && ip.length <= 64 ? ip : undefined;
 }
 
+/** Parses an IPv6 address into its eight 16-bit groups, or `null`. Accepts a dotted IPv4 tail. */
+function ipv6Groups(address: string): number[] | null {
+  let text = address;
+  const v4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text);
+  if (v4) {
+    const [a = 0, b = 0, c = 0, d = 0] = v4.slice(1).map(Number);
+    text = `${text.slice(0, v4.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const parse = (part: string | undefined) => (part ? part.split(':') : []);
+  const left = parse(halves[0]);
+  const right = parse(halves[1]);
+  const missing = 8 - left.length - right.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 0) return null;
+  const groups = [...left, ...Array<string>(Math.max(0, missing)).fill('0'), ...right];
+  if (groups.some((g) => !/^[0-9a-f]{1,4}$/i.test(g))) return null;
+  return groups.map((g) => Number.parseInt(g, 16));
+}
+
 /**
  * The rate-limit key of a client address. IPv6 clients usually hold a whole /64, so one key per
  * full address would let a single client rotate through billions of keys: IPv6 addresses are
- * keyed by their /64 prefix. IPv4 and IPv4-mapped addresses are keyed as they are.
+ * keyed by their /64 prefix. IPv4, in any of its IPv6 spellings and with or without a port, is
+ * keyed by the address itself.
  */
 export function networkKey(ip: string): string {
-  const address =
-    ip
-      .trim()
-      .replace(/^\[|\]$/g, '')
-      .split('%')[0] ?? '';
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
-  if (mapped?.[1]) return mapped[1];
+  let address = ip.trim();
+  const v4WithPort = /^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/.exec(address);
+  if (v4WithPort?.[1]) return v4WithPort[1];
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(address);
+  if (bracketed?.[1]) address = bracketed[1];
+  address = address.split('%')[0] ?? '';
   if (!address.includes(':')) return address;
-  const [head = '', tail = ''] = address.split('::');
-  const left = head ? head.split(':') : [];
-  const right = address.includes('::') && tail ? tail.split(':') : [];
-  const groups = address.includes('::')
-    ? [...left, ...Array<string>(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right]
-    : left;
-  const prefix = groups.slice(0, 4).map((g) => (Number.parseInt(g, 16) || 0).toString(16));
-  return `${prefix.join(':')}::/64`;
+  const groups = ipv6Groups(address);
+  if (!groups) return address;
+  const [g0, g1, g2, g3, g4, g5, g6 = 0, g7 = 0] = groups;
+  // ::ffff:a.b.c.d (mapped) and ::a.b.c.d (compatible, not :: or ::1) are IPv4 clients.
+  const v4Prefix = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0;
+  if (v4Prefix && (g5 === 0xffff || (g5 === 0 && g6 !== 0))) {
+    return `${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`;
+  }
+  return `${groups
+    .slice(0, 4)
+    .map((g) => g.toString(16))
+    .join(':')}::/64`;
 }
 
 /**

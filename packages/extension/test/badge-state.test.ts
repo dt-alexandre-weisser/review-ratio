@@ -136,7 +136,15 @@ describe('isStale', () => {
   });
 
   it('is stale when a refresh started and never finished (killed worker)', () => {
-    expect(isStale(cache({ refreshStartedAt: NOW - 4 * 60_000 }), NOW)).toBe(true);
+    expect(isStale(cache({ refreshStartedAt: NOW - 4 * 60_000 }), NOW)).toBe(false);
+    expect(isStale(cache({ refreshStartedAt: NOW - 6 * 60_000 }), NOW)).toBe(true);
+    // The refresh running now follows one that died: greyed from its start.
+    expect(isStale(cache({ refreshStartedAt: NOW - 1_000, unfinishedRefreshes: 2 }), NOW)).toBe(
+      true,
+    );
+    expect(isStale(cache({ refreshStartedAt: NOW - 1_000, unfinishedRefreshes: 1 }), NOW)).toBe(
+      false,
+    );
     const view = badgeView(
       cache({ refreshStartedAt: NOW - 30 * 60_000, score: { up: 1, down: 1, ratio: 1 } }),
       NOW,
