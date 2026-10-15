@@ -16,13 +16,15 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: Boolean(process.env['CI']),
-  retries: process.env['CI'] ? 1 : 0,
+  // No retries: a flaky end-to-end test is a bug to fix, not to hide.
+  retries: 0,
   reporter: process.env['CI'] ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: { trace: 'retain-on-failure' },
   webServer: {
     command: 'node packages/server/dist/node.js',
     url: 'http://127.0.0.1:8787/health',
-    reuseExistingServer: !process.env['CI'],
+    // Always the freshly built bundle, never a dev server left running on the port.
+    reuseExistingServer: false,
     env: { PORT: '8787', HOST: '127.0.0.1' },
     timeout: 30_000,
   },

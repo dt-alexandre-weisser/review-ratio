@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { badgeView, formatRatio, formatRp, toneOf } from '../src/lib/badge-state.ts';
+import { badgeView, formatRatio, formatRp, isStale, toneOf } from '../src/lib/badge-state.ts';
 import { EMPTY_CACHE, type BadgeCache } from '../src/lib/storage.ts';
 
 function cache(patch: Partial<BadgeCache>): BadgeCache {
@@ -78,11 +78,23 @@ describe('badgeView', () => {
     expect(view.tooltip).toBe('stale since 09:05');
   });
 
-  it('shows placeholders when stale without any score', () => {
+  it('shows placeholders when stale without any score, with the reason', () => {
     const view = badgeView(cache({ status: 'stale', score: null, error: 'server unreachable' }));
     expect(view.text).toContain('Ratio —');
     expect(view.stale).toBe(true);
-    expect(view.tooltip).toContain('server unreachable');
+    expect(view.tooltip).toBe('review-ratio could not refresh: server unreachable');
+    const github = badgeView(
+      cache({ status: 'github_error', score: null, error: 'GitHub answered 403' }),
+    );
+    expect(github.tooltip).toBe('review-ratio could not refresh: GitHub answered 403');
+  });
+
+  it('greys the last ratio on a GitHub error too', () => {
+    const scoredAt = new Date(2026, 9, 15, 9, 5).getTime();
+    const view = badgeView(
+      cache({ status: 'github_error', scoredAt, score: { up: 10, down: 5, ratio: 2 } }),
+    );
+    expect(view).toMatchObject({ stale: true, tone: 'neutral', tooltip: 'stale since 09:05' });
   });
 
   it('shows "update the extension" in grey on 426', () => {
@@ -101,5 +113,24 @@ describe('badgeView', () => {
   it('shows the no-activity state on a fresh ok cache without a score', () => {
     const view = badgeView(cache({ status: 'ok', score: null }));
     expect(view.tooltip).toContain('no activity');
+  });
+});
+
+describe('isStale', () => {
+  const at = Date.parse('2026-10-15T12:00:00Z');
+
+  it('is fresh after a successful refresh, and during the next one', () => {
+    expect(isStale(cache({ scoredAt: at, attemptedAt: at - 1000 }))).toBe(false);
+    expect(isStale(cache({ scoredAt: at, attemptedAt: at + 60_000 }))).toBe(false);
+    expect(isStale(cache({ scoredAt: null, attemptedAt: null }))).toBe(false);
+  });
+
+  it('is stale when refreshes keep starting without finishing (killed worker)', () => {
+    expect(isStale(cache({ scoredAt: at, attemptedAt: at + 21 * 60_000 }))).toBe(true);
+    expect(isStale(cache({ scoredAt: null, attemptedAt: at }))).toBe(true);
+    const view = badgeView(
+      cache({ scoredAt: at, attemptedAt: at + 30 * 60_000, score: { up: 1, down: 1, ratio: 1 } }),
+    );
+    expect(view.stale).toBe(true);
   });
 });

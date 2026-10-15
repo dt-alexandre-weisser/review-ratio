@@ -58,6 +58,9 @@ test('shows the ratio in the GitHub header and sends numbers only', async ({
   await expect(badge).toHaveAttribute('data-stale', 'false');
   await expect(badge).toHaveAttribute('title', /given \/ asked/);
 
+  // The pinned manifest key gives every install the same id: it says nothing about the machine.
+  expect(extensionId).toBe('bhmdipijifghpkibegnfchgcafodlgnb');
+
   expect(payloads.length).toBeGreaterThan(0);
   const sent = payloads.at(-1)!;
   for (const secret of [
@@ -132,6 +135,44 @@ test('reports both connections from the options page', async ({ context, extensi
   const options = await context.newPage();
   await configure(options, extensionId, { token: 'github_pat_e2e' });
   await options.getByRole('button', { name: 'Test connection' }).click();
-  await expect(options.locator('#status')).toContainText('token works for dev-e2e');
-  await expect(options.locator('#status')).toContainText('is up');
+  const status = options.locator('#status');
+  await expect(status).toContainText('token works for dev-e2e');
+  await expect(status).toContainText(
+    'pull requests of DiliTrust updated in the last 7 days are visible',
+  );
+  await expect(status).toContainText('is up');
+  await expect(status).toHaveAttribute('data-kind', 'ok');
+});
+
+test('injects the content script into an open GitHub tab, as after an update', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context);
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+  const github = await context.newPage();
+  await github.goto('https://github.com/');
+  await expect(github.locator('#review-ratio-badge .review-ratio-full')).toHaveText(/Ratio 1\.00/);
+
+  // The same calls the worker makes on install and update (chrome.runtime.reload() cannot be
+  // exercised here: Chrome unloads a command-line extension when it reloads).
+  const worker = context.serviceWorkers()[0]!;
+  const injected = await worker.evaluate(async () => {
+    const tabs = await chrome.tabs.query({ url: 'https://github.com/*' });
+    for (const tab of tabs) {
+      await chrome.scripting.insertCSS({ target: { tabId: tab.id! }, files: ['content.css'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id! }, files: ['content.js'] });
+    }
+    return tabs.length;
+  });
+  expect(injected).toBe(1);
+
+  await options.bringToFront();
+  await options.getByLabel('Server URL').fill('http://127.0.0.1:9');
+  await options.getByRole('button', { name: 'Refresh badge now' }).click();
+  await expect(options.locator('#status')).toContainText('stale since');
+
+  await expect(github.locator('#review-ratio-badge')).toHaveAttribute('data-stale', 'true');
+  await expect(github.locator('#review-ratio-badge')).toHaveCount(1);
 });

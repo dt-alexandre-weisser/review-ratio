@@ -32,7 +32,7 @@ github.com page ──► extension (MV3) ──► GitHub API (your own token, 
 
 ## Quick start (prototype)
 
-Prerequisites: Node 22.12 or later, pnpm 10 (`corepack enable`), Chrome, Edge, Brave or Arc.
+Prerequisites: Node 22.13 or later, pnpm 10 (`corepack enable`), Chrome, Edge, Brave or Arc.
 
 ```sh
 pnpm install
@@ -44,8 +44,12 @@ Load the extension:
 
 1. Open `chrome://extensions` and turn on **Developer mode**.
 2. Click **Load unpacked** and pick `packages/extension/dist`.
-3. The options page opens. Paste a token (below), click **Save**, then **Test connection**.
+3. The options page opens. Paste a token (below), click **Save**, then **Test connection**. The
+   test also checks that the token can see the organisation's private repositories.
 4. Open any github.com page. The badge appears in the header within a few seconds.
+
+Every install has the same extension id, `bhmdipijifghpkibegnfchgcafodlgnb`, pinned by the public
+key in the manifest.
 
 Create the token at <https://github.com/settings/personal-access-tokens/new>:
 
@@ -59,16 +63,16 @@ The token stays in `chrome.storage.local` and is only sent to `api.github.com`.
 
 ## Badge states
 
-| State                       | Badge                                          |
-| --------------------------- | ---------------------------------------------- |
-| Ratio ≥ 1.0                 | green                                          |
-| 0.5 ≤ ratio < 1.0           | grey                                           |
-| Ratio < 0.5                 | amber, never red                               |
-| Nothing asked               | `Ratio ∞`, green                               |
-| No activity at all          | `Ratio —`, grey, still visible                 |
-| Server unreachable          | last ratio greyed, tooltip `stale since HH:MM` |
-| Server retired this version | `update the extension`, grey                   |
-| No token, or token rejected | `review-ratio: set up` or `token rejected`     |
+| State                        | Badge                                          |
+| ---------------------------- | ---------------------------------------------- |
+| Ratio ≥ 1.0                  | green                                          |
+| 0.5 ≤ ratio < 1.0            | grey                                           |
+| Ratio < 0.5                  | amber, never red                               |
+| Nothing asked                | `Ratio ∞`, green                               |
+| No activity at all           | `Ratio —`, grey, still visible                 |
+| Server or GitHub unreachable | last ratio greyed, tooltip `stale since HH:MM` |
+| Server retired this version  | `update the extension`, grey                   |
+| No token, or token rejected  | `review-ratio: set up` or `token rejected`     |
 
 The badge refreshes on page load, at most once every 10 minutes. Clicking it does nothing. The
 options page has **Refresh badge now** and shows the last score and error.

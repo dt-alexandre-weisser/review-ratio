@@ -24,14 +24,21 @@ export interface DownContext {
   prKeyOf: (owner: string, repo: string, number: number) => string;
 }
 
+/**
+ * Normalised logins the PR counts as ↓ for: its human author, or the assignees of a
+ * `github-actions` PR. Empty for any other bot.
+ */
+export function ownersOf(pr: PullRequestDetails): Set<string> {
+  if (!pr.author) return new Set();
+  const login = normalizeLogin(pr.author.login);
+  if (pr.author.type !== 'Bot') return new Set([login]);
+  if (login === GITHUB_ACTIONS_LOGIN) return new Set(pr.assignees.map(normalizeLogin));
+  return new Set();
+}
+
 /** Whether the PR counts as asked by me. */
 export function isOwnedByMe(pr: PullRequestDetails, me: string): boolean {
-  if (!pr.author) return false;
-  const login = normalizeLogin(pr.author.login);
-  if (pr.author.type === 'Bot') {
-    return login === GITHUB_ACTIONS_LOGIN && pr.assignees.some((a) => normalizeLogin(a) === me);
-  }
-  return login === me;
+  return ownersOf(pr).has(me);
 }
 
 export function readyAtOf(pr: PullRequestDetails): number {

@@ -3,3 +3,6 @@ dist
 coverage
 pnpm-lock.yaml
 DESIGN.md
+# Frozen contract files: a formatter upgrade must never change their pinned hashes.
+packages/contract/src/v[0-9]*.ts
+packages/contract/fixtures/v*/*.json

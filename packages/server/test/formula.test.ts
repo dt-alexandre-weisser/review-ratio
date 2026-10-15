@@ -42,6 +42,14 @@ describe('weightedLines', () => {
     expect(weightedLines({})).toBe(0);
   });
 
+  it('ignores keys that are not file classes', () => {
+    const forged = JSON.parse('{"production":10,"constructor":5,"toString":7}') as Record<
+      string,
+      number
+    >;
+    expect(weightedLines(forged)).toBe(10);
+  });
+
   it('weights production highest and generated lowest', () => {
     const sorted = Object.entries(CLASS_WEIGHTS).sort(([, a], [, b]) => b - a);
     expect(sorted[0]![0]).toBe('production');
@@ -68,11 +76,17 @@ describe('decay', () => {
     expect(decay(48)).toBeGreaterThan(decay(72));
   });
 
-  it('is 0 after the window and 1 for the future or invalid ages', () => {
+  it('is 0 after the window and for invalid ages', () => {
     expect(decay(WINDOW_HOURS + 1)).toBe(0);
     expect(decay(10_000)).toBe(0);
-    expect(decay(-5)).toBe(1);
     expect(decay(Number.NaN)).toBe(0);
+  });
+
+  it('treats a slightly future record as new and a far-future one as nothing', () => {
+    expect(decay(-1)).toBe(1);
+    expect(decay(-PARAMETERS.futureToleranceHours)).toBe(1);
+    expect(decay(-PARAMETERS.futureToleranceHours - 0.01)).toBe(0);
+    expect(decay(-24 * 365)).toBe(0);
   });
 });
 

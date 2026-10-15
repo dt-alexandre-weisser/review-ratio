@@ -1,9 +1,18 @@
 /**
  * Collects the 7-day window from GitHub: every PR of the organisation I reviewed or own.
+ *
+ * One PR that GitHub cannot serve (deleted, transferred, timing out) is skipped, not fatal. The
+ * refresh fails only on an auth or rate-limit error, or when most PRs fail, which points at
+ * GitHub itself.
  */
 import type { Classifier } from '../classify.ts';
-import { normalizeLogin } from '../github/client.ts';
-import type { GitHubClient, PullRequestDetails } from '../github/types.ts';
+import {
+  GitHubAuthError,
+  GitHubError,
+  GitHubRateLimitError,
+  normalizeLogin,
+} from '../github/client.ts';
+import type { CompareFile, GitHubClient, PullRequestDetails } from '../github/types.ts';
 import { isExcludedRepo, type Settings } from '../settings.ts';
 import type { ViewedSnapshot } from '../storage.ts';
 import { WINDOW_MS, isoDate } from '../time.ts';
@@ -18,8 +27,10 @@ export interface CollectInput {
   nowMs: number;
   prKeys: Record<string, string>;
   viewedSnapshots: Record<string, ViewedSnapshot>;
+  /** Compare results by `owner/repo:base...head`. Two SHAs always compare the same way. */
+  compareCache: Record<string, CompareFile[]>;
   randomUUID: () => string;
-  /** How many PRs are fetched at once. */
+  /** How many PRs are processed at once. */
   concurrency?: number;
 }
 
@@ -30,6 +41,12 @@ export interface Collected {
   prKeys: Record<string, string>;
   /** Snapshots still in use. */
   viewedSnapshots: Record<string, ViewedSnapshot>;
+  /** Compare results used by this refresh. */
+  compareCache: Record<string, CompareFile[]>;
+  /** PRs that could not be read and were left out. */
+  skipped: number;
+  /** PRs read. */
+  total: number;
 }
 
 export interface PullRequestRef {
@@ -58,8 +75,14 @@ export function searchQueries(org: string, me: string, nowMs: number): string[] 
   ];
 }
 
+/** Errors that mean the whole refresh cannot work: stop at once instead of skipping a PR. */
+export function isFatal(error: unknown): boolean {
+  return error instanceof GitHubAuthError || error instanceof GitHubRateLimitError;
+}
+
 export async function collectWindow(input: CollectInput): Promise<Collected> {
-  const me = normalizeLogin((await input.github.viewer()).login);
+  const login = (await input.github.viewer()).login;
+  const me = normalizeLogin(login);
   const refs = new Map<string, PullRequestRef>();
   for (const query of searchQueries(input.settings.org, me, input.nowMs)) {
     for (const item of await input.github.searchPullRequests(query)) {
@@ -79,30 +102,72 @@ export async function collectWindow(input: CollectInput): Promise<Collected> {
     return existing;
   };
   const snapshots: Record<string, ViewedSnapshot> = { ...input.viewedSnapshots };
+  const compareCache: Record<string, CompareFile[]> = {};
 
-  const details = await mapWithConcurrency([...refs.values()], input.concurrency ?? 4, (ref) =>
-    input.github.pullRequest(ref.owner, ref.repo, ref.number),
-  );
+  const compareIn = (pr: PullRequestDetails) => async (base: string, head: string) => {
+    const key = `${pr.owner}/${pr.repo}:${base}...${head}`.toLowerCase();
+    const cached = compareCache[key] ?? input.compareCache[key];
+    if (cached) {
+      compareCache[key] = cached;
+      return cached;
+    }
+    try {
+      const files = await input.github.compare(pr.owner, pr.repo, base, head);
+      if (files) compareCache[key] = files;
+      return files;
+    } catch (error) {
+      if (isFatal(error)) throw error;
+      // A 5xx or timeout on one comparison: fall back to the PR's own diff for that review.
+      return null;
+    }
+  };
 
   const up: UpInput[] = [];
   const down: DownInput[] = [];
-  for (const pr of details) {
-    up.push(
-      ...(await upRecordsForPullRequest(pr, {
-        me,
-        nowMs: input.nowMs,
-        classify: input.classify,
-        compare: (o, r, b, h) => input.github.compare(o, r, b, h),
-        viewedSnapshots: snapshots,
-      })),
+  const results = await mapWithConcurrency(
+    [...refs.values()],
+    input.concurrency ?? 4,
+    async (ref) => {
+      try {
+        const pr = await input.github.pullRequest(ref.owner, ref.repo, ref.number, login);
+        const ups = await upRecordsForPullRequest(pr, {
+          me,
+          nowMs: input.nowMs,
+          classify: input.classify,
+          compare: compareIn(pr),
+          viewedSnapshots: snapshots,
+        });
+        const record = downRecordForPullRequest(pr, {
+          me,
+          nowMs: input.nowMs,
+          classify: input.classify,
+          prKeyOf,
+        });
+        return { ok: true as const, ups, record };
+      } catch (error) {
+        if (isFatal(error)) throw error;
+        return { ok: false as const, error };
+      }
+    },
+  );
+
+  let skipped = 0;
+  let lastError: unknown = null;
+  for (const result of results) {
+    if (!result.ok) {
+      skipped += 1;
+      lastError = result.error;
+      continue;
+    }
+    up.push(...result.ups);
+    if (result.record) down.push(result.record);
+  }
+  if (skipped > 0 && skipped * 2 > results.length) {
+    const reason = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new GitHubError(
+      `could not read ${skipped} of ${results.length} pull requests (${reason})`,
+      null,
     );
-    const record = downRecordForPullRequest(pr, {
-      me,
-      nowMs: input.nowMs,
-      classify: input.classify,
-      prKeyOf,
-    });
-    if (record) down.push(record);
   }
 
   const usedSnapshots: Record<string, ViewedSnapshot> = {};
@@ -111,7 +176,15 @@ export async function collectWindow(input: CollectInput): Promise<Collected> {
     if (snap) usedSnapshots[record.reviewId] = snap;
   }
 
-  return { up, down, prKeys, viewedSnapshots: usedSnapshots };
+  return {
+    up,
+    down,
+    prKeys,
+    viewedSnapshots: usedSnapshots,
+    compareCache,
+    skipped,
+    total: results.length,
+  };
 }
 
 async function mapWithConcurrency<T, R>(
@@ -131,5 +204,4 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-export type { PullRequestDetails };
 export type { DownInput, UpInput } from './types.ts';

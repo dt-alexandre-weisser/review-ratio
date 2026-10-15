@@ -39,6 +39,22 @@ describe('createClassifier with the published globs', () => {
     ['src/locales/index.ts', 'production'],
     ['CODEOWNERS', 'chore'],
     ['src/latest.ts', 'production'],
+    ['src/agent/tools/search.ts', 'production'],
+    ['src/app/scripts/main.ts', 'production'],
+    ['packages/server/scripts/build.mjs', 'tooling'],
+    ['tools/gen.py', 'tooling'],
+    ['src/components/ABTest.tsx', 'production'],
+    ['src/test/java/com/acme/FooTest.java', 'test'],
+    ['Api.Tests/FooTest.cs', 'test'],
+    ['jest.setup.ts', 'test'],
+    ['src/test.ts', 'test'],
+    ['tests/conftest.py', 'test'],
+    ['wwwroot/lib/bootstrap/dist/css/bootstrap.css', 'generated'],
+    ['api/v1/service_pb2_grpc.py', 'generated'],
+    ['src/types/schema.d.ts', 'generated'],
+    ['Data/Migrations/20240101120000_Init.cs', 'generated'],
+    ['shop/migrations/0001_initial.py', 'generated'],
+    ['api/schema.graphql', 'production'],
     ['src/contest/manifest.ts', 'production'],
     ['src/build.ts', 'production'],
     ['MyApp.Tests/UserServiceTests.cs', 'test'],
@@ -56,8 +72,8 @@ describe('createClassifier with the published globs', () => {
   });
 
   it('matches case-sensitively like Git', () => {
-    expect(classify('src/Latest.ts')).toBe('production');
-    expect(classify('src/UserTest.ts')).toBe('test');
+    expect(classify('src/Latest.cs')).toBe('production');
+    expect(classify('src/UserTest.cs')).toBe('test');
   });
 
   it('falls back to production', () => {

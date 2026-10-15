@@ -36,7 +36,7 @@ export const PUBLISHED_CLASSES: readonly PublishedClass[] = [
       '**/__snapshots__/**',
       '**/*.snap',
       '**/schema.ts',
-      '**/schema.graphql',
+      '**/schema.d.ts',
       '**/*.generated.*',
       '**/*.gen.*',
       '**/*.g.cs',
@@ -45,10 +45,18 @@ export const PUBLISHED_CLASSES: readonly PublishedClass[] = [
       '**/__generated__/**',
       '**/*.pb.go',
       '**/*_pb2.py',
+      '**/*_pb2.pyi',
+      '**/*_pb2_grpc.py',
       '**/*.min.js',
       '**/*.min.css',
       '**/*.map',
-      '**/*ModelSnapshot.cs',
+      // Scaffolded migrations: EF Core, Django, Alembic. Hand-written SQL migrations stay production.
+      '**/Migrations/*.cs',
+      '**/migrations/[0-9][0-9][0-9][0-9]_*.py',
+      '**/alembic/versions/*.py',
+      // Vendored third-party code.
+      '**/wwwroot/lib/**',
+      '**/vendor/**',
     ],
   },
   {
@@ -72,8 +80,15 @@ export const PUBLISHED_CLASSES: readonly PublishedClass[] = [
       '**/*.test.*',
       '**/*.spec.*',
       '**/*_test.*',
-      '**/*Test.*',
-      '**/*Tests.*',
+      // `*Test` naming only where the language uses it: `ABTest.tsx` is a component.
+      '**/*Test.{cs,java,kt,kts,scala,groovy,php,swift}',
+      '**/*Tests.{cs,java,kt,kts,scala,groovy,php,swift}',
+      '**/conftest.py',
+      '**/jest.setup.*',
+      '**/vitest.setup.*',
+      '**/setupTests.*',
+      '**/karma.conf.*',
+      '**/src/test.ts',
       '**/test_*.*',
       '**/*Tests/**',
       '**/*.Test/**',
@@ -157,10 +172,10 @@ export const PUBLISHED_CLASSES: readonly PublishedClass[] = [
   {
     name: 'tooling',
     globs: [
-      '**/scripts/**',
-      '**/script/**',
-      '**/tools/**',
-      '**/bin/**',
+      // At the repository root or the top of a monorepo package only: `src/agent/tools/` is
+      // production code.
+      '{scripts,script,tools,bin}/**',
+      '{packages,apps,libs,services}/*/{scripts,script,tools,bin}/**',
       '**/Makefile',
       '**/*.mk',
       '**/Dockerfile*',

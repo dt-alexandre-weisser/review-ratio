@@ -4,6 +4,7 @@ import { createClassifier } from '../src/lib/classify.ts';
 import {
   downRecordForPullRequest,
   isOwnedByMe,
+  ownersOf,
   readyAtOf,
   type DownContext,
 } from '../src/lib/collect/down.ts';
@@ -86,5 +87,20 @@ describe('downRecordForPullRequest', () => {
       ctx,
     );
     expect(record?.readyAtMs).toBe(NOW - 20 * 3_600_000);
+  });
+});
+
+describe('ownersOf', () => {
+  it('is the human author, the assignees of a github-actions PR, or nobody', () => {
+    expect([...ownersOf(pr({ author: { login: 'Alice', type: 'User' } }))]).toEqual(['alice']);
+    expect([
+      ...ownersOf(
+        pr({ author: { login: 'github-actions', type: 'Bot' }, assignees: ['Me', 'bob'] }),
+      ),
+    ]).toEqual(['me', 'bob']);
+    expect([
+      ...ownersOf(pr({ author: { login: 'dependabot', type: 'Bot' }, assignees: ['me'] })),
+    ]).toEqual([]);
+    expect([...ownersOf(pr({ author: null }))]).toEqual([]);
   });
 });

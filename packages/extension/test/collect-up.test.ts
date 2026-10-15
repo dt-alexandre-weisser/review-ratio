@@ -5,33 +5,43 @@ import {
   COMMENT_RANGE_CAP,
   actionOf,
   commentLines,
+  firstReviewId,
   upRecordsForPullRequest,
   type UpContext,
 } from '../src/lib/collect/up.ts';
-import type { CompareFile } from '../src/lib/github/types.ts';
+import type { CompareFile, PullRequestFile } from '../src/lib/github/types.ts';
 import type { ViewedSnapshot } from '../src/lib/storage.ts';
-import { NOW, comment, hoursAgo, pr, review } from './helpers/github.ts';
+import { NOW, comment, hoursAgo, pr, review, summary } from './helpers/github.ts';
 
 const classify = createClassifier([{ name: 'test', globs: ['**/*.test.ts'] }]);
 
+function file(path: string, lines: number, viewed = false): PullRequestFile {
+  return {
+    path,
+    additions: lines,
+    deletions: 0,
+    viewerViewedState: viewed ? 'VIEWED' : 'UNVIEWED',
+  };
+}
+
 function ctx(
-  overrides: Partial<UpContext> = {},
-  compareResult: CompareFile[] | null = [{ filename: 'src/app.ts', changes: 400 }],
+  compare: (base: string, head: string) => CompareFile[] | null = () => [
+    { filename: 'src/app.ts', changes: 400 },
+  ],
+  viewedSnapshots: Record<string, ViewedSnapshot> = {},
 ) {
   const calls: [string, string][] = [];
-  const snapshots: Record<string, ViewedSnapshot> = {};
   const context: UpContext = {
     me: 'me',
     nowMs: NOW,
     classify,
-    compare: (_o, _r, base, head) => {
+    compare: (base, head) => {
       calls.push([base, head]);
-      return Promise.resolve(compareResult);
+      return Promise.resolve(compare(base, head));
     },
-    viewedSnapshots: snapshots,
-    ...overrides,
+    viewedSnapshots,
   };
-  return { context, calls, snapshots: context.viewedSnapshots };
+  return { context, calls };
 }
 
 describe('actionOf', () => {
@@ -43,9 +53,7 @@ describe('actionOf', () => {
   });
 
   it('tells a comment review from a thread reply', () => {
-    expect(actionOf(review({ state: 'COMMENTED', body: 'Looks off', comments: [] }))).toBe(
-      'comment',
-    );
+    expect(actionOf(review({ state: 'COMMENTED', body: 'Looks off' }))).toBe('comment');
     expect(actionOf(review({ state: 'COMMENTED', comments: [comment()] }))).toBe('comment');
     expect(actionOf(review({ state: 'COMMENTED', comments: [comment({ isReply: true })] }))).toBe(
       'thread_reply',
@@ -53,7 +61,7 @@ describe('actionOf', () => {
     expect(
       actionOf(review({ state: 'COMMENTED', body: 'see', comments: [comment({ isReply: true })] })),
     ).toBe('comment');
-    expect(actionOf(review({ state: 'COMMENTED', body: '  ', comments: [] }))).toBeNull();
+    expect(actionOf(review({ state: 'COMMENTED', body: '  ' }))).toBeNull();
   });
 });
 
@@ -76,10 +84,31 @@ describe('commentLines', () => {
   });
 });
 
-describe('upRecordsForPullRequest', () => {
+describe('firstReviewId', () => {
+  it('skips bots, pending reviews and the owners of the PR', () => {
+    const reviews = [
+      summary({
+        id: 'bot',
+        author: { login: 'coderabbit', type: 'Bot' },
+        submittedAt: hoursAgo(9),
+      }),
+      summary({ id: 'pending', state: 'PENDING', submittedAt: null }),
+      summary({ id: 'owner', author: { login: 'Me', type: 'User' }, submittedAt: hoursAgo(8) }),
+      summary({ id: 'later', submittedAt: hoursAgo(2) }),
+      summary({ id: 'first', submittedAt: hoursAgo(5) }),
+    ];
+    expect(firstReviewId(reviews, new Set(['me']))).toBe('first');
+    expect(firstReviewId([], new Set())).toBeNull();
+  });
+});
+
+describe('upRecordsForPullRequest: covered lines', () => {
   it('credits my first review on the head with the full PR diff, without a compare call', async () => {
     const { context, calls } = ctx();
-    const records = await upRecordsForPullRequest(pr({ reviews: [review({ id: 'r1' })] }), context);
+    const records = await upRecordsForPullRequest(
+      pr({ myReviews: [review({ id: 'r1' })] }),
+      context,
+    );
     expect(calls).toEqual([]);
     expect(records).toEqual([
       {
@@ -94,35 +123,40 @@ describe('upRecordsForPullRequest', () => {
     ]);
   });
 
-  it('compares from the base on a first review of an older commit', async () => {
-    const { context, calls } = ctx({}, [{ filename: 'a.test.ts', changes: 50 }]);
+  it('compares a first review of an older commit from the fork point, which survives a merge', async () => {
+    const { context, calls } = ctx(() => [{ filename: 'src/app.ts', changes: 250 }]);
     const records = await upRecordsForPullRequest(
-      pr({ reviews: [review({ commitOid: 'old' })] }),
+      pr({ state: 'MERGED', myReviews: [review({ commitOid: 'old' })] }),
+      context,
+    );
+    expect(calls).toEqual([['fork', 'old']]);
+    expect(records[0]!.linesByClass).toEqual({ production: 250 });
+  });
+
+  it('falls back to the base tip when GitHub gives no fork point', async () => {
+    const { context, calls } = ctx();
+    await upRecordsForPullRequest(
+      pr({ forkOid: null, myReviews: [review({ commitOid: 'old' })] }),
       context,
     );
     expect(calls).toEqual([['base', 'old']]);
-    expect(records[0]!.linesByClass).toEqual({ test: 50 });
   });
 
-  it('credits a later review with the diff since my previous review, capped by the PR diff', async () => {
-    const calls: [string, string][] = [];
-    const { context } = ctx({
-      compare: (_o, _r, base, head) => {
-        calls.push([base, head]);
-        // From the base: the PR's own changes at c1. From c1: a rebase dragged in 900 lines.
-        return Promise.resolve(
-          base === 'base'
-            ? [{ filename: 'src/app.ts', changes: 250 }]
-            : [
-                { filename: 'src/app.ts', changes: 900 },
-                { filename: 'a.test.ts', changes: 10 },
-              ],
-        );
-      },
-    });
+  it('counts only PR files, each capped by its own diff, so "Update branch" is not reviewed code', async () => {
+    // 300-line PR, changes requested at c1; the author merges main (5,000 lines elsewhere) and
+    // fixes 5 lines; my approve covers those 5 lines.
+    const { context, calls } = ctx((base) =>
+      base === 'c1'
+        ? [
+            { filename: 'src/app.ts', changes: 5 },
+            { filename: 'src/from-main.ts', changes: 5000 },
+          ]
+        : [{ filename: 'src/app.ts', changes: 300 }],
+    );
     const records = await upRecordsForPullRequest(
       pr({
-        reviews: [
+        files: [file('src/app.ts', 300)],
+        myReviews: [
           review({
             id: 'r1',
             commitOid: 'c1',
@@ -135,20 +169,60 @@ describe('upRecordsForPullRequest', () => {
       context,
     );
     expect(calls).toEqual([
-      ['base', 'c1'],
+      ['fork', 'c1'],
       ['c1', 'head'],
     ]);
-    // 900 production lines are capped at the PR's 400; test lines are not in the PR at all.
-    expect(records.map((r) => r.linesByClass)).toEqual([{ production: 250 }, { production: 400 }]);
+    expect(records.map((r) => r.linesByClass)).toEqual([{ production: 300 }, { production: 5 }]);
   });
 
-  it('gives nothing new for a second review on the same commit', async () => {
+  it('caps a file at its own diff in the PR', async () => {
+    const { context } = ctx(() => [{ filename: 'src/app.ts', changes: 9000 }]);
+    const records = await upRecordsForPullRequest(
+      pr({
+        myReviews: [
+          review({ commitOid: 'c1', submittedAt: hoursAgo(5) }),
+          review({ commitOid: 'head', submittedAt: hoursAgo(1) }),
+        ],
+      }),
+      context,
+    );
+    expect(records[1]!.linesByClass).toEqual({ production: 400 });
+  });
+
+  it('falls back to the PR diff when GitHub cannot compare', async () => {
+    const { context } = ctx(() => null);
+    const records = await upRecordsForPullRequest(
+      pr({ myReviews: [review({ commitOid: 'gone' })] }),
+      context,
+    );
+    expect(records[0]!.linesByClass).toEqual({ production: 400 });
+  });
+
+  it('credits a commit once, to my strongest review on it: comment then approve equals approve', async () => {
     const { context } = ctx();
     const records = await upRecordsForPullRequest(
       pr({
-        reviews: [
-          review({ id: 'r1', submittedAt: hoursAgo(3), state: 'COMMENTED', body: 'hm' }),
-          review({ id: 'r2', submittedAt: hoursAgo(1) }),
+        myReviews: [
+          review({ id: 'c', submittedAt: hoursAgo(3), state: 'COMMENTED', comments: [comment()] }),
+          review({ id: 'a', submittedAt: hoursAgo(1) }),
+        ],
+      }),
+      context,
+    );
+    expect(records.map((r) => [r.reviewId, r.action, r.linesByClass])).toEqual([
+      ['c', 'comment', {}],
+      ['a', 'approve', { production: 400 }],
+    ]);
+    expect(records[0]!.commentedLinesByClass).toEqual({ production: 1 });
+  });
+
+  it('keeps the credit on an approval followed by a comment on the same commit', async () => {
+    const { context } = ctx();
+    const records = await upRecordsForPullRequest(
+      pr({
+        myReviews: [
+          review({ id: 'a', submittedAt: hoursAgo(3) }),
+          review({ id: 'c', submittedAt: hoursAgo(1), state: 'COMMENTED', body: 'nit' }),
         ],
       }),
       context,
@@ -156,20 +230,11 @@ describe('upRecordsForPullRequest', () => {
     expect(records.map((r) => r.linesByClass)).toEqual([{ production: 400 }, {}]);
   });
 
-  it('falls back to the PR diff when GitHub cannot compare', async () => {
-    const { context } = ctx({}, null);
-    const records = await upRecordsForPullRequest(
-      pr({ reviews: [review({ commitOid: 'gone' })] }),
-      context,
-    );
-    expect(records[0]!.linesByClass).toEqual({ production: 400 });
-  });
-
   it('gives a thread reply its commented lines only, and keeps the diff anchor', async () => {
     const { context, calls } = ctx();
     const records = await upRecordsForPullRequest(
       pr({
-        reviews: [
+        myReviews: [
           review({ id: 'r1', commitOid: 'c1', submittedAt: hoursAgo(5) }),
           review({
             id: 'reply',
@@ -190,7 +255,7 @@ describe('upRecordsForPullRequest', () => {
       viewedLinesByClass: {},
     });
     expect(calls).toEqual([
-      ['base', 'c1'],
+      ['fork', 'c1'],
       ['c1', 'head'],
     ]);
   });
@@ -199,7 +264,7 @@ describe('upRecordsForPullRequest', () => {
     const { context } = ctx();
     const records = await upRecordsForPullRequest(
       pr({
-        reviews: [
+        myReviews: [
           review({
             state: 'COMMENTED',
             comments: [
@@ -213,132 +278,189 @@ describe('upRecordsForPullRequest', () => {
       context,
     );
     expect(records[0]!.commentedLinesByClass).toEqual({ production: 4, test: 1 });
-    expect(records[0]!.action).toBe('comment');
   });
 
-  it('snapshots Viewed files while my review commit is the head, once per commit', async () => {
-    const { context, snapshots } = ctx();
-    const details = pr({
-      files: [
-        { path: 'src/app.ts', additions: 300, deletions: 100, viewerViewedState: 'VIEWED' },
-        { path: 'a.test.ts', additions: 20, deletions: 0, viewerViewedState: 'UNVIEWED' },
-      ],
-      reviews: [
-        review({ id: 'r1', submittedAt: hoursAgo(2), state: 'COMMENTED', body: 'q' }),
-        review({ id: 'r2', submittedAt: hoursAgo(1) }),
-      ],
-    });
-    const records = await upRecordsForPullRequest(details, context);
-    expect(records.map((r) => r.viewedLinesByClass)).toEqual([{}, { production: 400 }]);
-    expect(snapshots['r2']).toEqual({ linesByClass: { production: 400 }, takenAt: NOW });
-    expect(snapshots['r1']).toBeUndefined();
-  });
-
-  it('reuses the stored snapshot once the head moved, and loses it when there is none', async () => {
-    const stored: Record<string, ViewedSnapshot> = {
-      r1: { linesByClass: { production: 120 }, takenAt: 0 },
-    };
-    const { context } = ctx({ viewedSnapshots: stored });
+  it('keeps an out-of-window review as the anchor of the next one, without reporting it', async () => {
+    const { context, calls } = ctx();
     const records = await upRecordsForPullRequest(
       pr({
-        headRefOid: 'new-head',
-        reviews: [
-          review({ id: 'r1', commitOid: 'c1' }),
-          review({ id: 'r9', commitOid: 'c9', submittedAt: hoursAgo(0.5) }),
-        ],
-      }),
-      context,
-    );
-    expect(records.map((r) => r.viewedLinesByClass)).toEqual([{ production: 120 }, {}]);
-  });
-
-  it('sets the wait only on the first human review, from ready-for-review', async () => {
-    const { context } = ctx();
-    const details = pr({
-      createdAt: hoursAgo(100),
-      readyForReviewAt: hoursAgo(80),
-      reviews: [
-        review({
-          id: 'bot',
-          author: { login: 'coderabbit', type: 'Bot' },
-          submittedAt: hoursAgo(70),
-          state: 'COMMENTED',
-          body: 'x',
-        }),
-        review({
-          id: 'self',
-          author: { login: 'alice', type: 'User' },
-          submittedAt: hoursAgo(60),
-          state: 'COMMENTED',
-          body: 'x',
-        }),
-        review({ id: 'mine', submittedAt: hoursAgo(20) }),
-      ],
-    });
-    const records = await upRecordsForPullRequest(details, context);
-    expect(records[0]!.waitedHoursWithoutReview).toBe(60);
-
-    const later = await upRecordsForPullRequest(
-      pr({
-        reviews: [
-          review({ id: 'other', author: { login: 'bob', type: 'User' }, submittedAt: hoursAgo(5) }),
-          review({ id: 'mine', submittedAt: hoursAgo(1) }),
-        ],
-      }),
-      ctx().context,
-    );
-    expect(later[0]!.waitedHoursWithoutReview).toBe(0);
-  });
-
-  it('earns nothing on my own PRs, for other people, pending or out-of-window reviews', async () => {
-    const { context, calls } = ctx();
-    expect(
-      await upRecordsForPullRequest(
-        pr({ author: { login: 'Me', type: 'User' }, reviews: [review()] }),
-        context,
-      ),
-    ).toEqual([]);
-    expect(
-      await upRecordsForPullRequest(
-        pr({ reviews: [review({ author: { login: 'bob', type: 'User' } })] }),
-        context,
-      ),
-    ).toEqual([]);
-    expect(
-      await upRecordsForPullRequest(
-        pr({ reviews: [review({ state: 'PENDING', submittedAt: null })] }),
-        context,
-      ),
-    ).toEqual([]);
-    const old = await upRecordsForPullRequest(
-      pr({
-        reviews: [
+        myReviews: [
           review({ id: 'old', commitOid: 'c0', submittedAt: hoursAgo(200) }),
           review({ id: 'new', commitOid: 'head', submittedAt: hoursAgo(1) }),
         ],
       }),
       context,
     );
-    expect(old.map((r) => r.reviewId)).toEqual(['new']);
-    // The out-of-window review still anchors the diff of the next one.
+    expect(records.map((r) => r.reviewId)).toEqual(['new']);
     expect(calls).toEqual([['c0', 'head']]);
   });
+});
 
-  it('earns on a bot PR like on any PR', async () => {
+describe('upRecordsForPullRequest: Viewed bonus', () => {
+  it('counts the Viewed files of the credited range while its commit is the head, and snapshots them', async () => {
+    const { context } = ctx();
+    const details = pr({
+      files: [file('src/app.ts', 400, true), file('a.test.ts', 20)],
+      myReviews: [
+        review({ id: 'r1', submittedAt: hoursAgo(2), state: 'COMMENTED', body: 'q' }),
+        review({ id: 'r2', submittedAt: hoursAgo(1) }),
+      ],
+    });
+    const records = await upRecordsForPullRequest(details, context);
+    expect(records.map((r) => r.viewedLinesByClass)).toEqual([{}, { production: 400 }]);
+    expect(context.viewedSnapshots['r2']).toEqual({
+      linesByClass: { production: 400 },
+      takenAt: NOW,
+    });
+    expect(context.viewedSnapshots['r1']).toBeUndefined();
+  });
+
+  it('is not earned again for unchanged files on a re-review', async () => {
+    // 1,000-line PR, every file Viewed. The author pushes 10 lines to b.ts and I approve again:
+    // the re-approval covers 10 lines and earns the Viewed bonus on those 10, not on 1,000.
+    const { context } = ctx((base) =>
+      base === 'c1'
+        ? [{ filename: 'src/b.ts', changes: 10 }]
+        : [{ filename: 'src/a.ts', changes: 990 }],
+    );
+    const records = await upRecordsForPullRequest(
+      pr({
+        files: [file('src/a.ts', 990, true), file('src/b.ts', 10, true)],
+        myReviews: [
+          review({ id: 'r1', commitOid: 'c1', submittedAt: hoursAgo(5) }),
+          review({ id: 'r2', commitOid: 'head', submittedAt: hoursAgo(1) }),
+        ],
+      }),
+      context,
+    );
+    expect(records[1]).toMatchObject({
+      linesByClass: { production: 10 },
+      viewedLinesByClass: { production: 10 },
+    });
+  });
+
+  it('reuses the stored snapshot once the head moved, and has none otherwise', async () => {
+    const { context } = ctx(() => [{ filename: 'src/app.ts', changes: 400 }], {
+      r1: { linesByClass: { production: 120 }, takenAt: 0 },
+    });
+    const records = await upRecordsForPullRequest(
+      pr({
+        headRefOid: 'new-head',
+        myReviews: [
+          review({ id: 'r1', commitOid: 'c1', submittedAt: hoursAgo(2) }),
+          review({ id: 'r9', commitOid: 'c9', submittedAt: hoursAgo(1) }),
+        ],
+      }),
+      context,
+    );
+    expect(records.map((r) => r.viewedLinesByClass)).toEqual([{ production: 120 }, {}]);
+  });
+});
+
+describe('upRecordsForPullRequest: rescue and ownership', () => {
+  it('sets the wait only on the first human, non-owner review, from ready-for-review', async () => {
+    const { context } = ctx();
+    const mine = review({ id: 'mine', submittedAt: hoursAgo(20) });
+    const details = pr({
+      createdAt: hoursAgo(100),
+      readyForReviewAt: hoursAgo(80),
+      reviews: [
+        summary({
+          id: 'bot',
+          author: { login: 'coderabbit', type: 'Bot' },
+          submittedAt: hoursAgo(70),
+        }),
+        summary({
+          id: 'self',
+          author: { login: 'alice', type: 'User' },
+          submittedAt: hoursAgo(60),
+        }),
+        summary({ id: 'mine', author: { login: 'me', type: 'User' }, submittedAt: hoursAgo(20) }),
+      ],
+      myReviews: [mine],
+    });
+    expect((await upRecordsForPullRequest(details, context))[0]!.waitedHoursWithoutReview).toBe(60);
+
+    const later = await upRecordsForPullRequest(
+      pr({
+        reviews: [summary({ submittedAt: hoursAgo(5) })],
+        myReviews: [review({ submittedAt: hoursAgo(1) })],
+      }),
+      context,
+    );
+    expect(later[0]!.waitedHoursWithoutReview).toBe(0);
+  });
+
+  it('earns nothing on PRs I own, including a github-actions PR assigned to me', async () => {
+    const { context } = ctx();
+    expect(
+      await upRecordsForPullRequest(
+        pr({ author: { login: 'Me', type: 'User' }, myReviews: [review()] }),
+        context,
+      ),
+    ).toEqual([]);
+    expect(
+      await upRecordsForPullRequest(
+        pr({
+          author: { login: 'github-actions', type: 'Bot' },
+          assignees: ['me'],
+          myReviews: [review()],
+        }),
+        context,
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not count the bot PR's assignee as the first reviewer of someone else's review", async () => {
     const { context } = ctx();
     const records = await upRecordsForPullRequest(
-      pr({ author: { login: 'dependabot', type: 'Bot' }, reviews: [review()] }),
+      pr({
+        author: { login: 'github-actions', type: 'Bot' },
+        assignees: ['carol'],
+        createdAt: hoursAgo(60),
+        reviews: [
+          summary({
+            id: 'carol',
+            author: { login: 'carol', type: 'User' },
+            submittedAt: hoursAgo(55),
+          }),
+          summary({ id: 'mine', author: { login: 'me', type: 'User' }, submittedAt: hoursAgo(1) }),
+        ],
+        myReviews: [review({ id: 'mine', submittedAt: hoursAgo(1) })],
+      }),
+      context,
+    );
+    expect(records[0]!.waitedHoursWithoutReview).toBe(59);
+  });
+
+  it('earns on a Dependabot PR like on any PR', async () => {
+    const { context } = ctx();
+    const records = await upRecordsForPullRequest(
+      pr({ author: { login: 'dependabot', type: 'Bot' }, myReviews: [review()] }),
       context,
     );
     expect(records).toHaveLength(1);
   });
 
-  it('matches my login case-insensitively', async () => {
+  it('ignores reviews of other people, pending reviews, and matches my login case-insensitively', async () => {
     const { context } = ctx();
-    const records = await upRecordsForPullRequest(
-      pr({ reviews: [review({ author: { login: 'ME', type: 'User' } })] }),
-      context,
-    );
-    expect(records).toHaveLength(1);
+    expect(
+      await upRecordsForPullRequest(
+        pr({ myReviews: [review({ author: { login: 'bob', type: 'User' } })] }),
+        context,
+      ),
+    ).toEqual([]);
+    expect(
+      await upRecordsForPullRequest(
+        pr({ myReviews: [review({ state: 'PENDING', submittedAt: null })] }),
+        context,
+      ),
+    ).toEqual([]);
+    expect(
+      await upRecordsForPullRequest(
+        pr({ myReviews: [review({ author: { login: 'ME', type: 'User' } })] }),
+        context,
+      ),
+    ).toHaveLength(1);
   });
 });

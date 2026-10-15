@@ -6,18 +6,22 @@ import { deflateSync } from 'node:zlib';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+/** @typedef {[number, number, number, number]} Rgba */
+
 const CRC_TABLE = new Uint32Array(256).map((_, n) => {
   let c = n;
   for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
   return c >>> 0;
 });
 
+/** @param {Uint8Array} bytes */
 function crc32(bytes) {
   let crc = 0xffffffff;
-  for (const b of bytes) crc = CRC_TABLE[(crc ^ b) & 0xff] ^ (crc >>> 8);
+  for (const b of bytes) crc = (CRC_TABLE[(crc ^ b) & 0xff] ?? 0) ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+/** @param {string} type @param {Buffer} data */
 function chunk(type, data) {
   const typeBytes = Buffer.from(type, 'ascii');
   const length = Buffer.alloc(4);
@@ -27,7 +31,7 @@ function chunk(type, data) {
   return Buffer.concat([length, typeBytes, data, crc]);
 }
 
-/** @param {number} size @param {(x: number, y: number) => [number, number, number, number]} shade */
+/** @param {number} size @param {(x: number, y: number) => Rgba} shade */
 export function png(size, shade) {
   const raw = Buffer.alloc((size * 4 + 1) * size);
   for (let y = 0; y < size; y += 1) {
@@ -57,11 +61,17 @@ export function png(size, shade) {
   ]);
 }
 
+/** @type {[number, number, number]} */
 const GREEN = [31, 136, 61];
 
-/** Supersampled shader: a green disc with a white up arrow (left) and down arrow (right). */
+/**
+ * Supersampled shader: a green disc with a white up arrow (left) and down arrow (right).
+ * @param {number} size
+ * @returns {(x: number, y: number) => Rgba}
+ */
 function iconShader(size) {
   const samples = 4;
+  const [gr0, gg0, gb0] = GREEN;
   return (x, y) => {
     let disc = 0;
     let glyph = 0;
@@ -78,14 +88,17 @@ function iconShader(size) {
     const total = samples * samples;
     const a = disc / total;
     const g = glyph / total;
-    const r = Math.round(GREEN[0] * (1 - g) + 255 * g);
-    const gr = Math.round(GREEN[1] * (1 - g) + 255 * g);
-    const b = Math.round(GREEN[2] * (1 - g) + 255 * g);
+    const r = Math.round(gr0 * (1 - g) + 255 * g);
+    const gr = Math.round(gg0 * (1 - g) + 255 * g);
+    const b = Math.round(gb0 * (1 - g) + 255 * g);
     return [r, gr, b, Math.round(a * 255)];
   };
 }
 
-/** An arrow centred on `cx`, pointing up or down, in unit coordinates. */
+/**
+ * An arrow centred on `cx`, pointing up or down, in unit coordinates.
+ * @param {number} px @param {number} py @param {number} cx @param {boolean} up
+ */
 function arrow(px, py, cx, up) {
   const shaft = Math.abs(px - cx) <= 0.045 && py >= 0.3 && py <= 0.7;
   const tipY = up ? 0.28 : 0.72;
@@ -95,6 +108,7 @@ function arrow(px, py, cx, up) {
   return shaft || head;
 }
 
+/** @param {string} dir */
 export function writeIcons(dir) {
   mkdirSync(dir, { recursive: true });
   for (const size of [16, 32, 48, 128]) {

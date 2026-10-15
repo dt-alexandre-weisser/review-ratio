@@ -3,6 +3,7 @@
   "name": "review-ratio",
   "version": "0.0.0",
   "description": "A private badge in the GitHub header: how much you review compared to how much you ask to be reviewed.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuIecroQ21fuuPWq1VSwb4pazEjNwRHNtjaOLhHZKJeAJVaUbGYEiAdCxZR1CmJvs+2JonolnCPLk2v9KYnAPiVem01R+QVaRK8Jr3Y9AW3JTBO8HZeHA0Blwd0oy6pdL5DoB0pALG2VZSIrXXnR4Wc3OCZwSdbfFNERB/DqSdsTWPe/mwOrWPBojjgA+9EJAbao7m/aRJgP7NIcI/uMeBta0hbEu2dSltznOtdAn3paDheqInBcsua8GthzhmYI+rfpjAU6rdbCeXtXC8AK6k3XLTrnR7ZkFHss/3r0D0byJDpnDLSZsDs5YFXjnCdm8IaYF1n4GebJCqpg+9rYYRQIDAQAB",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon-16.png",
@@ -10,7 +11,7 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "scripting"],
   "host_permissions": [
     "https://api.github.com/*",
     "https://github.com/*",

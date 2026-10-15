@@ -1,24 +1,30 @@
 /**
  * ↑ side: the reviews I submitted on one pull request.
  *
- * Rules (DESIGN.md › Formula, Bot PRs, Viewed capture):
- * - My own PRs earn no ↑, whatever I post on them.
- * - Covered lines are the diff since the commit of my previous real review on the PR; the full
- *   diff on my first one. A thread reply is not a real review and does not move that anchor.
+ * Rules (DESIGN.md › Formula, Bot PRs, Viewed capture; docs/decisions.md):
+ * - PRs I own (authored, or a github-actions PR assigned to me) earn no ↑.
+ * - Covered lines are the diff since the commit of my previous real review, the full diff on my
+ *   first one. They are counted per file, only for files of the PR, each capped by that file's
+ *   own diff: a merge of the base branch into the PR never counts as reviewed code.
+ * - Each reviewed commit range is credited once, to my strongest review on that commit
+ *   (approve or request changes, else a comment review). Commenting first, then approving the
+ *   same commit, is worth the same as approving.
  * - A `COMMENTED` review with an empty body whose comments are all replies is a thread reply:
- *   it earns the commented-lines term only.
+ *   it earns the commented-lines term only and does not move the previous-review anchor.
  * - Comment ranges are capped at 20 lines.
- * - The Viewed bonus goes to my latest real review on the current head, from a snapshot taken
- *   while that commit was still the head.
- * - `waitedHoursWithoutReview` is set when my review is the first non-bot, non-author review.
+ * - The Viewed bonus covers the files of the credited range that I marked Viewed, from a
+ *   snapshot taken while that commit was still the PR head.
+ * - `waitedHoursWithoutReview` is set when my review is the first review by a human who does
+ *   not own the PR.
  */
-import type { FileClass, LinesByClassV1, ReviewActionV1 } from '@review-ratio/contract';
+import type { LinesByClassV1, ReviewActionV1 } from '@review-ratio/contract';
 
 import { linesByClass, type Classifier } from '../classify.ts';
 import { normalizeLogin } from '../github/client.ts';
-import type { GitHubClient, PullRequestDetails, Review } from '../github/types.ts';
+import type { CompareFile, PullRequestDetails, Review, ReviewSummary } from '../github/types.ts';
 import type { ViewedSnapshot } from '../storage.ts';
 import { WINDOW_MS, hoursBetween, parseIso } from '../time.ts';
+import { isOwnedByMe, ownersOf, readyAtOf } from './down.ts';
 import type { UpInput } from './types.ts';
 
 export const COMMENT_RANGE_CAP = 20;
@@ -28,18 +34,14 @@ export interface UpContext {
   me: string;
   nowMs: number;
   classify: Classifier;
-  compare: GitHubClient['compare'];
-  /** Existing snapshots. New ones are added to the returned map. */
+  /** Compares two commits of this PR's repository; `null` when GitHub cannot. */
+  compare: (base: string, head: string) => Promise<CompareFile[] | null>;
+  /** Existing snapshots. New ones are added to this map. */
   viewedSnapshots: Record<string, ViewedSnapshot>;
 }
 
-export function isBot(review: Review): boolean {
-  return review.author?.type === 'Bot';
-}
-
-function isMine(review: Review, me: string): boolean {
-  return review.author !== null && normalizeLogin(review.author.login) === me;
-}
+/** Lines per path. */
+type FileLines = Map<string, number>;
 
 /** Maps a GitHub review to a contract action, or `null` when it earns nothing. */
 export function actionOf(review: Review): ReviewActionV1 | null {
@@ -61,7 +63,12 @@ export function actionOf(review: Review): ReviewActionV1 | null {
   }
 }
 
-/** Lines of a comment range, `start_line..line`, capped. */
+/** A real review covers code; a thread reply only answers. */
+function strength(action: ReviewActionV1): number {
+  return action === 'approve' || action === 'request_changes' ? 2 : action === 'comment' ? 1 : 0;
+}
+
+/** Lines of a comment range, `start_line..line`, at least 1, capped. */
 export function commentLines(comment: Review['comments'][number]): number {
   const end = comment.line ?? comment.originalLine;
   if (end === null) return 1;
@@ -69,144 +76,153 @@ export function commentLines(comment: Review['comments'][number]): number {
   return Math.min(COMMENT_RANGE_CAP, Math.max(1, end - start + 1));
 }
 
-function firstReviewId(pr: PullRequestDetails): string | null {
-  const author = pr.author ? normalizeLogin(pr.author.login) : null;
+/** The first submitted review by a human who does not own the PR. */
+export function firstReviewId(
+  reviews: readonly ReviewSummary[],
+  owners: ReadonlySet<string>,
+): string | null {
   let first: { id: string; at: number } | null = null;
-  for (const review of pr.reviews) {
-    if (review.state === 'PENDING' || review.submittedAt === null || isBot(review)) continue;
-    if (author !== null && review.author && normalizeLogin(review.author.login) === author)
-      continue;
+  for (const review of reviews) {
+    if (review.state === 'PENDING' || review.submittedAt === null) continue;
+    if (!review.author || review.author.type === 'Bot') continue;
+    if (owners.has(normalizeLogin(review.author.login))) continue;
     const at = parseIso(review.submittedAt);
     if (first === null || at < first.at) first = { id: review.id, at };
   }
   return first?.id ?? null;
 }
 
-function viewedLines(pr: PullRequestDetails, classify: Classifier): LinesByClassV1 {
+function prFileLines(pr: PullRequestDetails): FileLines {
+  return new Map(pr.files.map((f) => [f.path, f.additions + f.deletions]));
+}
+
+function classifyLines(lines: FileLines, classify: Classifier): LinesByClassV1 {
   return linesByClass(
-    pr.files
-      .filter((f) => f.viewerViewedState === 'VIEWED')
-      .map((f) => ({ path: f.path, lines: f.additions + f.deletions })),
+    [...lines].map(([path, n]) => ({ path, lines: n })),
     classify,
   );
+}
+
+/**
+ * Lines I covered with a review of `commit`, per file: the diff since `previous` (my previous
+ * reviewed commit), or since the fork point on my first review. Only files of the PR count, each
+ * capped by its own diff in the PR.
+ */
+async function coveredFiles(
+  pr: PullRequestDetails,
+  commit: string,
+  previous: string | null,
+  ctx: UpContext,
+): Promise<FileLines> {
+  const whole = prFileLines(pr);
+  if (previous === null && commit === pr.headRefOid) return whole;
+  const files = await ctx.compare(previous ?? pr.forkOid ?? pr.baseRefOid, commit);
+  // GitHub cannot compare any more (force-push, deleted commit): fall back to the PR's diff.
+  if (files === null) return whole;
+  const covered: FileLines = new Map();
+  for (const file of files) {
+    const cap = whole.get(file.filename);
+    if (cap === undefined) continue;
+    const lines = Math.min((covered.get(file.filename) ?? 0) + file.changes, cap);
+    if (lines > 0) covered.set(file.filename, lines);
+  }
+  return covered;
+}
+
+interface Mine {
+  review: Review;
+  tMs: number;
+  action: ReviewActionV1;
+}
+
+interface Range {
+  commit: string;
+  previous: string | null;
+  /** The review that gets the covered lines and the Viewed bonus of this range. */
+  credited: Mine;
+}
+
+/** Groups my real reviews by reviewed commit, in order, and picks the review credited for each. */
+function rangesOf(mine: readonly Mine[]): Range[] {
+  const ranges = new Map<string, Range>();
+  let previous: string | null = null;
+  for (const entry of mine) {
+    const commit = entry.review.commitOid;
+    if (strength(entry.action) === 0 || commit === null) continue;
+    const range = ranges.get(commit);
+    if (!range) {
+      ranges.set(commit, { commit, previous, credited: entry });
+      previous = commit;
+    } else if (strength(entry.action) >= strength(range.credited.action)) {
+      range.credited = entry;
+    }
+  }
+  return [...ranges.values()];
 }
 
 export async function upRecordsForPullRequest(
   pr: PullRequestDetails,
   ctx: UpContext,
 ): Promise<UpInput[]> {
-  if (pr.author && normalizeLogin(pr.author.login) === ctx.me) return [];
+  if (isOwnedByMe(pr, ctx.me)) return [];
 
-  const mine = pr.reviews
+  const mine: Mine[] = pr.myReviews
     .flatMap((review) => {
       const action = actionOf(review);
-      if (!isMine(review, ctx.me) || review.submittedAt === null || action === null) return [];
+      if (!review.author || normalizeLogin(review.author.login) !== ctx.me) return [];
+      if (review.submittedAt === null || action === null) return [];
       return [{ review, tMs: parseIso(review.submittedAt), action }];
     })
     .sort((a, b) => a.tMs - b.tMs);
   if (mine.length === 0) return [];
 
-  const first = firstReviewId(pr);
-  const readyAtMs = parseIso(pr.readyForReviewAt ?? pr.createdAt);
   const windowStart = ctx.nowMs - WINDOW_MS;
+  const ranges = rangesOf(mine).filter((r) => r.credited.tMs >= windowStart);
+  const coveredByReview = new Map<string, FileLines>(
+    await Promise.all(
+      ranges.map(
+        async (r) =>
+          [r.credited.review.id, await coveredFiles(pr, r.commit, r.previous, ctx)] as const,
+      ),
+    ),
+  );
 
-  // The latest real review per commit gets the Viewed bonus, so three reviews on one head do
-  // not triple it.
-  const latestRealByCommit = new Map<string, string>();
-  for (const { review, action } of mine) {
-    if (action !== 'thread_reply' && review.commitOid)
-      latestRealByCommit.set(review.commitOid, review.id);
-  }
+  const first = firstReviewId(pr.reviews, ownersOf(pr));
+  const readyAtMs = readyAtOf(pr);
+  const viewedNow = new Set(
+    pr.files.filter((f) => f.viewerViewedState === 'VIEWED').map((f) => f.path),
+  );
 
   const records: UpInput[] = [];
-  let previousRealCommit: string | null = null;
   for (const { review, tMs, action } of mine) {
-    const inWindow = tMs >= windowStart;
-    let covered: LinesByClassV1 = {};
-    if (action !== 'thread_reply') {
-      if (inWindow && review.commitOid) {
-        covered = await coveredLines(pr, review.commitOid, previousRealCommit, ctx);
-      }
-      if (review.commitOid) previousRealCommit = review.commitOid;
-    }
-    if (!inWindow) continue;
-
-    const commented = linesByClass(
-      review.comments.map((c) => ({ path: c.path, lines: commentLines(c) })),
-      ctx.classify,
-    );
+    if (tMs < windowStart) continue;
+    const covered = coveredByReview.get(review.id);
 
     let viewed: LinesByClassV1 = {};
-    if (
-      action !== 'thread_reply' &&
-      review.commitOid &&
-      latestRealByCommit.get(review.commitOid) === review.id
-    ) {
+    if (covered) {
       if (review.commitOid === pr.headRefOid) {
-        viewed = viewedLines(pr, ctx.classify);
+        viewed = classifyLines(
+          new Map([...covered].filter(([path]) => viewedNow.has(path))),
+          ctx.classify,
+        );
         ctx.viewedSnapshots[review.id] = { linesByClass: viewed, takenAt: ctx.nowMs };
       } else {
         viewed = ctx.viewedSnapshots[review.id]?.linesByClass ?? {};
       }
     }
 
-    const waited = first === review.id ? Math.max(0, hoursBetween(readyAtMs, tMs)) : 0;
-
     records.push({
       reviewId: review.id,
       tMs,
       action,
-      linesByClass: covered,
-      commentedLinesByClass: commented,
+      linesByClass: covered ? classifyLines(covered, ctx.classify) : {},
+      commentedLinesByClass: linesByClass(
+        review.comments.map((c) => ({ path: c.path, lines: commentLines(c) })),
+        ctx.classify,
+      ),
       viewedLinesByClass: viewed,
-      waitedHoursWithoutReview: waited,
+      waitedHoursWithoutReview: first === review.id ? Math.max(0, hoursBetween(readyAtMs, tMs)) : 0,
     });
   }
   return records;
-}
-
-/** Lines of the PR's current diff, per class. */
-function prLines(pr: PullRequestDetails, classify: Classifier): LinesByClassV1 {
-  return linesByClass(
-    pr.files.map((f) => ({ path: f.path, lines: f.additions + f.deletions })),
-    classify,
-  );
-}
-
-/** Per-class minimum. */
-function capLines(lines: LinesByClassV1, cap: LinesByClassV1): LinesByClassV1 {
-  const out: Partial<Record<FileClass, number>> = {};
-  for (const [cls, n] of Object.entries(lines) as [FileClass, number | undefined][]) {
-    const capped = Math.min(n ?? 0, cap[cls] ?? 0);
-    if (capped > 0) out[cls] = capped;
-  }
-  return out;
-}
-
-/**
- * Lines I covered with a review on `commit`: the diff since my previous real review, or the
- * full PR diff on my first one.
- *
- * The incremental diff is capped per class by the PR's own diff. A three-dot compare between
- * two PR commits spans their merge base, so after the author rebases onto a newer base branch
- * it would also count the base branch's changes.
- */
-async function coveredLines(
-  pr: PullRequestDetails,
-  commit: string,
-  previousCommit: string | null,
-  ctx: UpContext,
-): Promise<LinesByClassV1> {
-  if (previousCommit === commit) return {};
-  const whole = prLines(pr, ctx.classify);
-  if (previousCommit === null && commit === pr.headRefOid) return whole;
-
-  const files = await ctx.compare(pr.owner, pr.repo, previousCommit ?? pr.baseRefOid, commit);
-  // GitHub cannot compare any more (force-push, deleted commit): fall back to the PR's diff.
-  if (files === null) return whole;
-  const covered = linesByClass(
-    files.map((f) => ({ path: f.filename, lines: f.changes })),
-    ctx.classify,
-  );
-  return previousCommit === null ? covered : capLines(covered, whole);
 }

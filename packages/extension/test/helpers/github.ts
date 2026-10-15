@@ -4,6 +4,7 @@ import type {
   PullRequestDetails,
   Review,
   ReviewComment,
+  ReviewSummary,
   SearchPullRequest,
 } from '../../src/lib/github/types.ts';
 
@@ -12,9 +13,12 @@ export const HOUR = 3_600_000;
 export const iso = (ms: number) => new Date(ms).toISOString();
 export const hoursAgo = (h: number) => iso(NOW - h * HOUR);
 
+let seq = 0;
+const nextId = (prefix: string) => `${prefix}${(seq += 1)}`;
+
 export function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
   return {
-    id: `c${Math.random()}`,
+    id: nextId('c'),
     path: 'src/app.ts',
     line: 10,
     startLine: null,
@@ -25,9 +29,10 @@ export function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
   };
 }
 
+/** One of my reviews, in full. */
 export function review(overrides: Partial<Review> = {}): Review {
   return {
-    id: `r${Math.random()}`,
+    id: nextId('r'),
     author: { login: 'me', type: 'User' },
     state: 'APPROVED',
     submittedAt: hoursAgo(1),
@@ -38,7 +43,20 @@ export function review(overrides: Partial<Review> = {}): Review {
   };
 }
 
+/** Somebody's review, as the light list of every review on the PR carries it. */
+export function summary(overrides: Partial<ReviewSummary> = {}): ReviewSummary {
+  return {
+    id: nextId('s'),
+    author: { login: 'bob', type: 'User' },
+    state: 'APPROVED',
+    submittedAt: hoursAgo(1),
+    ...overrides,
+  };
+}
+
+/** A PR by alice with one 400-line production file. `myReviews` also feed `reviews`. */
 export function pr(overrides: Partial<PullRequestDetails> = {}): PullRequestDetails {
+  const myReviews = overrides.myReviews ?? [];
   return {
     owner: 'DiliTrust',
     repo: 'app',
@@ -51,10 +69,14 @@ export function pr(overrides: Partial<PullRequestDetails> = {}): PullRequestDeta
     closedAt: null,
     headRefOid: 'head',
     baseRefOid: 'base',
+    forkOid: 'fork',
     readyForReviewAt: null,
     files: [{ path: 'src/app.ts', additions: 300, deletions: 100, viewerViewedState: 'UNVIEWED' }],
-    reviews: [],
     ...overrides,
+    reviews:
+      overrides.reviews ??
+      myReviews.map(({ id, author, state, submittedAt }) => ({ id, author, state, submittedAt })),
+    myReviews,
   };
 }
 
@@ -72,7 +94,7 @@ export interface FakeGitHub extends GitHubClient {
   compares: [string, string][];
 }
 
-/** A GitHub client backed by in-memory PRs. Search returns PRs by query predicate. */
+/** A GitHub client backed by in-memory PRs. Search returns every PR unless told otherwise. */
 export function fakeGitHub(options: {
   login?: string;
   prs: PullRequestDetails[];

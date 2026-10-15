@@ -2,15 +2,15 @@
  * Builds the anonymous payload: numbers only, rounded as the contract requires, validated
  * against the frozen schema before it leaves the browser.
  *
- * Line counts are rounded to a multiple of 10 without bias. The rounding direction is drawn
- * from a hash of the review or PR key, so the same record rounds the same way on every refresh
- * and the badge does not flicker. Rounding to the nearest 10 instead would turn every one-line
- * comment into 0 and erase the comment term of the formula.
+ * Covered, Viewed and ↓ lines round to the nearest 10, so equal sizes on both sides round alike
+ * and the anchor invariant holds. Commented lines round to a multiple of 10 without bias: a
+ * one-line comment would otherwise always round to 0 and erase the comment term. The rounding
+ * direction is drawn from a hash of the review id, so it is the same on every refresh.
  */
 import {
   LATEST_CONTRACT_VERSION,
+  ceilHours,
   payloadV1,
-  roundHours,
   roundLines,
   roundToHour,
   type,
@@ -31,10 +31,12 @@ export function hashUnit(seed: string): number {
   return (hash >>> 0) / 0x1_0000_0000;
 }
 
-export function roundLinesByClass(lines: LinesByClassV1, seed: string): LinesByClassV1 {
+/** Rounds every class to the nearest 10, or without bias when a seed is given. */
+export function roundLinesByClass(lines: LinesByClassV1, unbiasedSeed?: string): LinesByClassV1 {
   const out: Partial<Record<FileClass, number>> = {};
   for (const [cls, n] of Object.entries(lines) as [FileClass, number | undefined][]) {
-    const rounded = roundLines(n ?? 0, hashUnit(`${seed}:${cls}`));
+    const u = unbiasedSeed === undefined ? 0.5 : hashUnit(`${unbiasedSeed}:${cls}`);
+    const rounded = roundLines(n ?? 0, u);
     if (rounded > 0) out[cls] = rounded;
   }
   return out;
@@ -46,16 +48,16 @@ export function buildPayload(up: readonly UpInput[], down: readonly DownInput[])
     up: up.map((r) => ({
       t: roundToHour(r.tMs),
       action: r.action,
-      linesByClass: roundLinesByClass(r.linesByClass, `${r.reviewId}:covered`),
+      linesByClass: roundLinesByClass(r.linesByClass),
       commentedLinesByClass: roundLinesByClass(r.commentedLinesByClass, `${r.reviewId}:commented`),
-      viewedLinesByClass: roundLinesByClass(r.viewedLinesByClass, `${r.reviewId}:viewed`),
-      waitedHoursWithoutReview: roundHours(r.waitedHoursWithoutReview),
+      viewedLinesByClass: roundLinesByClass(r.viewedLinesByClass),
+      waitedHoursWithoutReview: ceilHours(r.waitedHoursWithoutReview),
     })),
     down: down.map((r) => ({
       prKey: r.prKey,
       readyAt: roundToHour(r.readyAtMs),
       ...(r.closedAtMs === null ? {} : { closedAt: roundToHour(r.closedAtMs) }),
-      linesByClass: roundLinesByClass(r.linesByClass, `${r.prKey}:asked`),
+      linesByClass: roundLinesByClass(r.linesByClass),
     })),
   };
   const result = payloadV1(candidate);

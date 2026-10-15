@@ -2,7 +2,13 @@ import { FIXTURES_BY_MAJOR } from '@review-ratio/contract/fixtures';
 import { classesResponseV1, scoreResponseV1, type } from '@review-ratio/contract';
 import { describe, expect, it } from 'vitest';
 
-import { MAX_BODY_BYTES, createApp, isAllowedOrigin } from '../src/app.ts';
+import {
+  MAX_BODY_BYTES,
+  MAX_PROBLEMS,
+  createApp,
+  isAllowedOrigin,
+  isJsonContentType,
+} from '../src/app.ts';
 import { forwardedClientIp } from '../src/rate-limit.ts';
 import type { Decoder } from '../src/decoders/index.ts';
 
@@ -137,6 +143,55 @@ describe('POST /score', () => {
     for (let i = 0; i < 3; i += 1) {
       expect((await limited.request('/classes')).status).toBe(200);
     }
+  });
+});
+
+describe('POST /score hardening', () => {
+  it('refuses a body that is not declared as JSON, before it counts against the rate limit', async () => {
+    const limited = app({ rateLimit: { limit: 1, windowMs: 60_000, keyOf: () => 'victim' } });
+    for (const contentType of ['text/plain', 'application/x-www-form-urlencoded', '']) {
+      const res = await limited.request(
+        new Request('http://localhost/score', {
+          method: 'POST',
+          headers: contentType ? { 'content-type': contentType } : {},
+          body: JSON.stringify(anchor.payload),
+        }),
+      );
+      expect(res.status).toBe(415);
+      expect((await json(res)).error.code).toBe('unsupported_media_type');
+    }
+    // The victim's single request of the window is still available.
+    expect((await limited.request(post(anchor.payload))).status).toBe(200);
+  });
+
+  it('accepts JSON with a charset parameter', () => {
+    expect(isJsonContentType('application/json; charset=utf-8')).toBe(true);
+    expect(isJsonContentType('Application/JSON')).toBe(true);
+    expect(isJsonContentType('application/jsonp')).toBe(false);
+    expect(isJsonContentType(undefined)).toBe(false);
+  });
+
+  it('echoes at most a few validation problems', async () => {
+    const up = Array.from({ length: 50 }, () => ({ t: 'nope' }));
+    const res = await app().request(post({ contractVersion: 1, up, down: [] }));
+    expect(res.status).toBe(400);
+    expect((await json(res)).error.problems).toHaveLength(MAX_PROBLEMS);
+  });
+
+  it('answers 400, never 200 with NaN, for keys named like Object.prototype members', async () => {
+    const raw = JSON.stringify(anchor.payload).replace(
+      '"linesByClass":{',
+      '"linesByClass":{"constructor":1,',
+    );
+    const res = await app().request(post(raw));
+    expect(res.status).toBe(400);
+  });
+
+  it('ignores a client-supplied request id', async () => {
+    const res = await app().request(post(anchor.payload, { 'x-request-id': 'attacker-chosen' }));
+    const id = res.headers.get('x-request-id');
+    expect(id).not.toBe('attacker-chosen');
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
 

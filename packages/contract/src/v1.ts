@@ -1,30 +1,55 @@
 /**
- * Contract major 1. FROZEN.
+ * Contract major 1.
  *
- * This file is released. Its hash is pinned in `frozen.json` and CI fails when it changes.
- * A breaking change to the payload is a new major: copy this file to `v2.ts`, edit the copy,
- * and add a decoder for it on the server. Installed extensions keep sending major 1 until they
- * update, so the server must keep decoding it until the major is retired on purpose.
+ * Once released, this file is FROZEN: its hash is pinned in `frozen.json` and CI fails when it
+ * changes. A breaking change to the payload is a new major: copy this file to `v2.ts`, edit the
+ * copy, and add a decoder for it on the server. Installed extensions keep sending major 1 until
+ * they update, so the server must keep decoding it until the major is retired on purpose.
+ *
+ * Self-contained on purpose: it imports nothing but ArkType, so the pinned hash covers every
+ * constant the schema depends on.
  */
 import { type } from 'arktype';
 
-import { HOUR_MS, LINES_GRANULARITY } from './rounding.ts';
-
 export const CONTRACT_VERSION_1 = 1 as const;
 
+const HOUR_MS = 3_600_000;
+const LINES_GRANULARITY = 10;
 /** Upper bound of a single line count. Protects the server from absurd numbers. */
 const MAX_LINES = 1_000_000;
-/** Upper bound of records per payload. A 7-day window never needs more. */
-const MAX_UP_RECORDS = 2_000;
-const MAX_DOWN_RECORDS = 500;
+/** Upper bounds of records per payload. A 7-day window of one human never needs more. */
+const MAX_UP_RECORDS = 500;
+const MAX_DOWN_RECORDS = 200;
 /** Upper bound of `waitedHoursWithoutReview`. */
 const MAX_WAITED_HOURS = 100_000;
 
-export const fileClassV1 = type(
-  "'production' | 'test' | 'config' | 'ci' | 'tooling' | 'docs' | 'generated' | 'chore'",
-);
+const FILE_CLASSES_V1 = [
+  'production',
+  'test',
+  'config',
+  'ci',
+  'tooling',
+  'docs',
+  'generated',
+  'chore',
+] as const;
 
-/** A line count, rounded to the nearest 10 by the extension. */
+/**
+ * Rejects every key that is not listed, own keys included. ArkType's `'+': 'reject'` lets keys
+ * named like `Object.prototype` members through (`toString`, `constructor`, `__proto__`), so the
+ * allowlist is checked again on the parsed object's own keys.
+ */
+function onlyKeys(allowed: readonly string[]) {
+  const set = new Set(allowed);
+  return (value: object, ctx: { mustBe: (expected: string) => false }): boolean => {
+    const extra = Object.keys(value).filter((key) => !set.has(key));
+    return extra.length === 0 || ctx.mustBe(`free of unknown keys (got ${extra.join(', ')})`);
+  };
+}
+
+export const fileClassV1 = type.enumerated(...FILE_CLASSES_V1);
+
+/** A line count, rounded to a multiple of 10 by the extension. */
 export const linesV1 = type(`number.integer % ${LINES_GRANULARITY} >= 0 & number <= ${MAX_LINES}`);
 
 /** Lines per file class. Absent classes mean 0. */
@@ -38,14 +63,30 @@ export const linesByClassV1 = type({
   'generated?': linesV1,
   'chore?': linesV1,
   '+': 'reject',
-});
+}).narrow(onlyKeys(FILE_CLASSES_V1));
 
-/** An ISO 8601 timestamp rounded to the hour by the extension. */
+/** An ISO 8601 UTC timestamp (`Z` suffix), rounded to the hour by the extension. */
 export const hourV1 = type('string.date.iso').narrow(
-  (value, ctx) => Date.parse(value) % HOUR_MS === 0 || ctx.mustBe('rounded to the hour'),
+  (value, ctx) =>
+    (value.endsWith('Z') && Date.parse(value) % HOUR_MS === 0) ||
+    ctx.mustBe('a UTC timestamp (Z) rounded to the hour'),
 );
 
-export const reviewActionV1 = type("'approve' | 'request_changes' | 'comment' | 'thread_reply'");
+export const reviewActionV1 = type.enumerated(
+  'approve',
+  'request_changes',
+  'comment',
+  'thread_reply',
+);
+
+const UP_KEYS = [
+  't',
+  'action',
+  'linesByClass',
+  'commentedLinesByClass',
+  'viewedLinesByClass',
+  'waitedHoursWithoutReview',
+] as const;
 
 /** One review I submitted. Earns ↑ RP. */
 export const upRecordV1 = type({
@@ -61,7 +102,9 @@ export const upRecordV1 = type({
   /** Hours the PR had waited without any review when I reviewed it. 0 when someone reviewed before me. */
   waitedHoursWithoutReview: type(`number.integer >= 0 & number <= ${MAX_WAITED_HOURS}`),
   '+': 'reject',
-});
+}).narrow(onlyKeys(UP_KEYS));
+
+const DOWN_KEYS = ['prKey', 'readyAt', 'closedAt', 'linesByClass'] as const;
 
 /** One PR I own that is, or was, in review. Earns ↓ RP. */
 export const downRecordV1 = type({
@@ -73,14 +116,14 @@ export const downRecordV1 = type({
   'closedAt?': hourV1,
   linesByClass: linesByClassV1,
   '+': 'reject',
-});
+}).narrow(onlyKeys(DOWN_KEYS));
 
 export const payloadV1 = type({
   contractVersion: `${CONTRACT_VERSION_1}`,
   up: upRecordV1.array().atMostLength(MAX_UP_RECORDS),
   down: downRecordV1.array().atMostLength(MAX_DOWN_RECORDS),
   '+': 'reject',
-});
+}).narrow(onlyKeys(['contractVersion', 'up', 'down']));
 
 /** Answer of `POST /score`. `ratio` is `null` when ↓ is 0: the badge shows ∞ or —. */
 export const scoreResponseV1 = type({

@@ -1,7 +1,15 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["node"]
+    "types": ["node", "chrome"],
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["eslint.config.js", "vitest.config.ts", "playwright.config.ts", "e2e/**/*"]
+  "include": [
+    "eslint.config.js",
+    "vitest.config.ts",
+    "playwright.config.ts",
+    "e2e/**/*",
+    "packages/*/scripts/*.mjs"
+  ]
 }

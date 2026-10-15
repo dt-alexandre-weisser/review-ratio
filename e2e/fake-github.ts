@@ -9,7 +9,17 @@ export const ME = 'dev-e2e';
 const ORG = 'DiliTrust';
 const hourAgo = () => new Date(Date.now() - 3_600_000).toISOString();
 
-function pullRequest(number: number, author: string, reviews: unknown[]) {
+interface FakeReview {
+  id: string;
+  state: string;
+  submittedAt: string;
+  body: string;
+  author: { login: string; __typename: string };
+  commit: { oid: string };
+  comments: { nodes: unknown[] };
+}
+
+function pullRequest(number: number, author: string, reviews: FakeReview[]) {
   return {
     number,
     state: 'OPEN',
@@ -21,6 +31,7 @@ function pullRequest(number: number, author: string, reviews: unknown[]) {
     author: { login: author, __typename: 'User' },
     assignees: { nodes: [] },
     timelineItems: { nodes: [] },
+    commits: { nodes: [{ commit: { parents: { nodes: [{ oid: 'fork' }] } } }] },
     files: {
       pageInfo: { hasNextPage: false, endCursor: null },
       nodes: [
@@ -32,7 +43,18 @@ function pullRequest(number: number, author: string, reviews: unknown[]) {
         },
       ],
     },
-    reviews: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: reviews },
+    reviews: {
+      nodes: reviews.map(({ id, state, submittedAt, author: by }) => ({
+        id,
+        state,
+        submittedAt,
+        author: by,
+      })),
+    },
+    myReviews: {
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: reviews.filter((r) => r.author.login === ME),
+    },
   };
 }
 
@@ -80,6 +102,7 @@ export async function installFakeGitHub(context: BrowserContext, options: FakeGi
     if (options.rejectToken) return json(route, { message: 'Bad credentials' }, 401);
     const url = new URL(route.request().url());
     if (url.pathname === '/user') return json(route, { login: ME });
+    if (url.pathname === `/orgs/${ORG}/repos`) return json(route, [{ id: 1, private: true }]);
     if (url.pathname === '/search/issues') {
       const q = url.searchParams.get('q') ?? '';
       const numbers = q.includes(`reviewed-by:${ME}`)

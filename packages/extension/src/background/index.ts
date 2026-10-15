@@ -8,8 +8,19 @@ import { isRequest, type BadgeUpdate, type Request, type Response } from '../lib
 import { refresh, refreshIfDue, type RefreshDeps } from '../lib/refresh.ts';
 import { createServerClient } from '../lib/server-client.ts';
 import { Store, chromeStorageArea } from '../lib/storage.ts';
+import { isTrustedFor } from './senders.ts';
+
+/** Extension API calls reset the service worker's 30 s idle timer; fetches alone do not. */
+const KEEP_ALIVE_MS = 20_000;
+const GITHUB_TABS = 'https://github.com/*';
 
 const store = new Store(chromeStorageArea());
+
+// The GitHub token lives in storage.local. Content scripts never need it: keep it out of reach
+// of a compromised github.com renderer.
+chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch((error: unknown) => {
+  console.warn('[review-ratio] cannot restrict storage access', error);
+});
 
 const deps: RefreshDeps = {
   store,
@@ -26,14 +37,19 @@ const deps: RefreshDeps = {
 let inFlight: Promise<void> | null = null;
 
 function runExclusive(task: () => Promise<unknown>): Promise<void> {
-  inFlight ??= task()
-    .then(() => undefined)
-    .catch((error: unknown) => {
+  inFlight ??= (async () => {
+    const keepAlive = setInterval(() => {
+      void chrome.runtime.getPlatformInfo();
+    }, KEEP_ALIVE_MS);
+    try {
+      await task();
+    } catch (error) {
       console.error('[review-ratio] refresh crashed', error);
-    })
-    .finally(() => {
+    } finally {
+      clearInterval(keepAlive);
       inFlight = null;
-    });
+    }
+  })();
   return inFlight;
 }
 
@@ -42,7 +58,7 @@ async function broadcastBadge(): Promise<void> {
   const message: BadgeUpdate = { type: 'badge:update', view };
   let tabs: chrome.tabs.Tab[];
   try {
-    tabs = await chrome.tabs.query({ url: 'https://github.com/*' });
+    tabs = await chrome.tabs.query({ url: GITHUB_TABS });
   } catch (error) {
     console.warn('[review-ratio] cannot list tabs', error);
     return;
@@ -59,12 +75,9 @@ async function broadcastBadge(): Promise<void> {
   );
 }
 
-function refreshInBackground(force: boolean): void {
+function refreshInBackground(): void {
   void runExclusive(async () => {
-    const result = force
-      ? { refreshed: true, cache: await refresh(deps) }
-      : await refreshIfDue(deps);
-    if (result.refreshed) await broadcastBadge();
+    if ((await refreshIfDue(deps)).refreshed) await broadcastBadge();
   });
 }
 
@@ -72,7 +85,7 @@ async function handle(request: Request): Promise<Response> {
   switch (request.type) {
     case 'badge:get': {
       const cache = await store.getBadge();
-      refreshInBackground(false);
+      refreshInBackground();
       return { type: 'badge:view', view: badgeView(cache) };
     }
     case 'badge:refresh': {
@@ -88,8 +101,12 @@ async function handle(request: Request): Promise<Response> {
 }
 
 chrome.runtime.onMessage.addListener(
-  (message: unknown, _sender, sendResponse: (response: Response) => void) => {
+  (message: unknown, sender, sendResponse: (response: Response) => void) => {
     if (!isRequest(message)) return false;
+    if (!isTrustedFor(message, sender, chrome.runtime.id, chrome.runtime.getURL(''))) {
+      sendResponse({ type: 'error', message: 'not allowed' });
+      return false;
+    }
     handle(message)
       .then(sendResponse)
       .catch((error: unknown) => {
@@ -102,7 +119,29 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
+/**
+ * Chrome injects manifest content scripts on navigation only. GitHub tabs live for days, so after
+ * an install or an update the open tabs get the new content script here.
+ */
+async function injectIntoOpenTabs(): Promise<void> {
+  const tabs = await chrome.tabs.query({ url: GITHUB_TABS });
+  await Promise.all(
+    tabs.map(async (tab) => {
+      if (tab.id === undefined) return;
+      try {
+        await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ['content.css'] });
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      } catch {
+        // Discarded or restricted tab: it gets the script on its next navigation.
+      }
+    }),
+  );
+}
+
 chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'install' || details.reason === 'update') {
+    void injectIntoOpenTabs();
+  }
   if (details.reason === 'install') {
     void store.getSettings().then((settings) => {
       if (!settings.token) void chrome.runtime.openOptionsPage();

@@ -1,11 +1,11 @@
 name: CI
 
 on:
-  # Every branch push, so a branch gets checks before a pull request exists. The pull request
-  # trigger also tests the merge result with the base branch.
+  # Every branch push, so a branch has checks before a pull request exists. The checks attach to
+  # the head commit and show on its pull request; there is no separate pull_request trigger, so
+  # each commit runs once. Require branches to be up to date before merging to test the merge.
   push:
     branches: ['**']
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -13,7 +13,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A newer push to a branch supersedes the running checks; main keeps every run.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CI: 'true'
@@ -34,8 +35,14 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
-      - name: Frozen contract schemas
+      - name: Contract pins match the files
         run: node packages/contract/scripts/freeze.mjs
+      - name: No released contract major changed against main
+        run: |
+          base="$RUNNER_TEMP/base-frozen.json"
+          git fetch --no-tags --depth=1 origin main
+          git show origin/main:packages/contract/frozen.json > "$base" 2> /dev/null || echo '{}' > "$base"
+          node packages/contract/scripts/freeze.mjs --against "$base"
       - name: Unit tests, contract gates (fixtures and anchor invariant per major), coverage
         run: pnpm test:coverage
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -115,14 +122,18 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Smoke test the image
         run: |
-          docker run -d --name rr -p 8080:8080 review-ratio-server:ci
+          # Fails fast without an explicit proxy setting.
+          if docker run --rm review-ratio-server:ci; then echo 'started without TRUSTED_PROXY_HOPS' >&2; exit 1; fi
+          docker run -d --name rr -p 8080:8080 -e TRUSTED_PROXY_HOPS=0 review-ratio-server:ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/health; then break; fi
             sleep 1
           done
           body='{"contractVersion":1,"up":[],"down":[]}'
           curl -fsS -X POST http://127.0.0.1:8080/score -H 'content-type: application/json' -d "$body" | tee /dev/stderr | grep -q '"ratio":null'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/score -H 'content-type: text/plain' -d "$body")" = 415
           test "$(docker exec rr id -u)" != "0"
+          docker exec rr sh -c '! command -v npm'
       - name: Container logs
         if: always()
         run: docker logs rr || true

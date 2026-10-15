@@ -2,7 +2,7 @@
  * Pure mapping from the cached state to what the badge shows. See DESIGN.md › Badge.
  */
 import type { BadgeCache } from './storage.ts';
-import { localClock } from './time.ts';
+import { REFRESH_INTERVAL_MS, localClock } from './time.ts';
 
 export type Tone = 'good' | 'neutral' | 'low';
 
@@ -63,7 +63,7 @@ export function badgeView(cache: BadgeCache): BadgeView {
     };
   }
 
-  const stale = cache.status === 'stale';
+  const stale = isStale(cache);
   const score = cache.score;
   if (!score) {
     return {
@@ -72,7 +72,7 @@ export function badgeView(cache: BadgeCache): BadgeView {
       tone: 'neutral',
       stale: true,
       tooltip: stale
-        ? `review-ratio server unreachable${cache.error ? `: ${cache.error}` : ''}`
+        ? `review-ratio could not refresh${cache.error ? `: ${cache.error}` : ''}`
         : `review-ratio (${GIVEN_ASKED}): no activity in the last 7 days`,
     };
   }
@@ -92,9 +92,18 @@ export function badgeView(cache: BadgeCache): BadgeView {
   }
 
   const text = `↑ ${formatRp(up)} · ↓ ${formatRp(down)} | Ratio ${ratioText}`;
-  let tooltip = `review-ratio (${GIVEN_ASKED}), last 7 days`;
-  if (stale) {
-    tooltip = `stale since ${cache.scoredAt === null ? '?' : localClock(cache.scoredAt)}`;
-  }
+  const tooltip = stale
+    ? `stale since ${cache.scoredAt === null ? '?' : localClock(cache.scoredAt)}`
+    : `review-ratio (${GIVEN_ASKED}), last 7 days`;
   return { text, short: `Ratio ${ratioText}`, tone: stale ? 'neutral' : tone, stale, tooltip };
+}
+
+/**
+ * Whether the score shown is out of date: the last refresh failed, or refreshes keep being
+ * attempted without succeeding (a service worker killed mid-refresh leaves the status `ok`).
+ */
+export function isStale(cache: BadgeCache): boolean {
+  if (cache.status === 'stale' || cache.status === 'github_error') return true;
+  if (cache.attemptedAt === null) return false;
+  return cache.scoredAt === null || cache.attemptedAt - cache.scoredAt > 2 * REFRESH_INTERVAL_MS;
 }

@@ -6,7 +6,15 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/coverage/**', '**/node_modules/**', '**/*.d.ts', '.wrangler/**'],
+    ignores: [
+      '**/dist/**',
+      '**/coverage/**',
+      '**/node_modules/**',
+      '**/*.d.ts',
+      '.wrangler/**',
+      'playwright-report/**',
+      'test-results/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
@@ -48,10 +56,11 @@ export default tseslint.config(
   {
     files: ['**/*.js', '**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
-    languageOptions: {
-      ...tseslint.configs.disableTypeChecked.languageOptions,
-      globals: globals.node,
-    },
+  },
+  {
+    // ESLint merges languageOptions across matching entries: this adds Node globals only.
+    files: ['**/*.js', '**/*.mjs'],
+    languageOptions: { globals: globals.node },
   },
   prettier,
 );

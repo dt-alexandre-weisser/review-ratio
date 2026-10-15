@@ -2,11 +2,21 @@
 
 ## Server configuration
 
-| Variable             | Default     | Meaning                                                                                                         |
-| -------------------- | ----------- | --------------------------------------------------------------------------------------------------------------- |
-| `PORT`               | `8787`      | Listening port. The Docker image sets `8080`.                                                                   |
-| `HOST`               | `127.0.0.1` | Listening address. The Docker image sets `0.0.0.0`.                                                             |
-| `TRUSTED_PROXY_HOPS` | `0`         | Proxies in front of the server that append to `X-Forwarded-For`. `0` keys the rate limit on the socket address. |
+| Variable             | Default     | Meaning                                                                                                                                                      |
+| -------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PORT`               | `8787`      | Listening port. The Docker image sets `8080`.                                                                                                                |
+| `HOST`               | `127.0.0.1` | Listening address. The Docker image sets `0.0.0.0`.                                                                                                          |
+| `TRUSTED_PROXY_HOPS` | none        | Proxies in front of the server that append to `X-Forwarded-For`. Required whenever `HOST` is not a loopback address: the server refuses to start without it. |
+
+`TRUSTED_PROXY_HOPS` decides what the rate limit keys on:
+
+| Deployment                                 | Value | Rate limit key               |
+| ------------------------------------------ | ----- | ---------------------------- |
+| Clients connect straight to the server     | `0`   | socket address               |
+| Cloud Run (Google's front end appends one) | `1`   | last `X-Forwarded-For` entry |
+| A load balancer in front of Cloud Run      | `2`   | second to last entry         |
+
+A wrong value either lets clients forge their key or puts every client in one bucket.
 
 Endpoints:
 
@@ -32,12 +42,12 @@ The extension's default server URL is `http://127.0.0.1:8787`, which its manifes
 
 ```sh
 docker build -f packages/server/Dockerfile -t review-ratio-server .
-docker run --rm -p 8080:8080 review-ratio-server
+docker run --rm -p 8080:8080 -e TRUSTED_PROXY_HOPS=0 review-ratio-server
 ```
 
-The image runs one self-contained bundle as the unprivileged `node` user and has a health check
-on `/health`. On Cloud Run, set `TRUSTED_PROXY_HOPS=1`: Google's front end appends the client
-address to `X-Forwarded-For`.
+The image runs one self-contained bundle, with source maps, as the unprivileged `node` user on
+root-owned code. It has no package manager and a health check on `/health`. The base image is
+pinned by digest; Dependabot proposes updates. On Cloud Run, set `TRUSTED_PROXY_HOPS=1`.
 
 ## Remote: Cloudflare Workers
 
@@ -46,12 +56,15 @@ pnpm --filter @review-ratio/server build:worker   # checks the bundle has no Nod
 pnpm --filter @review-ratio/server exec wrangler deploy
 ```
 
-`wrangler` is not a dependency of the repository; install it where you deploy. The rate limit
-keys on `cf-connecting-ip` and lives in one isolate's memory, so it is a soft brake.
+`wrangler` is not a dependency of the repository; install it where you deploy. Wrangler bundles
+`src/worker.ts` itself; `build:worker` only proves in CI that it bundles without Node APIs. The
+rate limit keys on `cf-connecting-ip` and lives in one isolate's memory, so it is a soft brake.
+Platform observability is off in `wrangler.toml`: it would record client addresses.
 
 ## Pointing the extension at a remote server
 
-Set **Server URL** in the extension options. The server answers CORS for `chrome-extension://`
+Set **Server URL** in the extension options. A remote server must use HTTPS; plain HTTP is only
+accepted for `localhost` and `127.0.0.1`. The server answers CORS for `chrome-extension://`
 origins, so no manifest change is needed. For a fixed company URL, add it to `host_permissions`
 in `packages/extension/manifest.json` and change `DEFAULT_SETTINGS.serverUrl`.
 
@@ -60,6 +73,11 @@ in `packages/extension/manifest.json` and change `DEFAULT_SETTINGS.serverUrl`.
 1. Bump `version` in `packages/extension/package.json`; the build copies it into the manifest.
 2. `pnpm check && pnpm test:e2e`.
 3. Zip `packages/extension/dist` (CI uploads it as an artifact on every run).
+4. On update, the extension injects its new content script into GitHub tabs that are already
+   open; the old one stops itself.
+
+The manifest's `key` gives unpacked installs a fixed id. The Chrome Web Store assigns its own key;
+remove `key` from the manifest when publishing there.
 
 ## Contract majors
 

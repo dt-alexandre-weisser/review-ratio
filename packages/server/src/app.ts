@@ -1,7 +1,6 @@
-import { Hono, type Context } from 'hono';
+import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
-import { requestId } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
@@ -10,10 +9,22 @@ import { DECODERS, RETIRED_MAJORS, readContractVersion, type Decoder } from './d
 import { score } from './formula.ts';
 import { rateLimit, type RateLimitOptions } from './rate-limit.ts';
 
+declare module 'hono' {
+  interface ContextVariableMap {
+    requestId: string;
+  }
+}
+
 export const SERVER_VERSION = '0.1.0';
 
-/** Largest accepted request body. A full 7-day payload is a few kilobytes. */
-export const MAX_BODY_BYTES = 256 * 1024;
+/**
+ * Largest accepted request body. A typical 7-day payload is a few KiB; the largest payload the
+ * schema accepts (500 ↑ and 200 ↓ records, every class filled) stays under this.
+ */
+export const MAX_BODY_BYTES = 512 * 1024;
+
+/** Validation problems echoed back to the sender, at most. */
+export const MAX_PROBLEMS = 10;
 
 export type ErrorCode =
   | 'not_found'
@@ -22,6 +33,7 @@ export type ErrorCode =
   | 'unsupported_version'
   | 'upgrade_required'
   | 'payload_too_large'
+  | 'unsupported_media_type'
   | 'rate_limited'
   | 'internal';
 
@@ -60,6 +72,24 @@ export function isAllowedOrigin(origin: string): boolean {
   );
 }
 
+/**
+ * Whether a request declares a JSON body. Requiring it makes every cross-site `fetch` a CORS
+ * preflighted request, which the CORS policy refuses for foreign origins: a web page cannot then
+ * spend a developer's rate limit with no-cors posts.
+ */
+export function isJsonContentType(header: string | undefined): boolean {
+  if (!header) return false;
+  const mediaType = header.split(';')[0]?.trim().toLowerCase();
+  return mediaType === 'application/json';
+}
+
+const requireJson: MiddlewareHandler = async (c, next) => {
+  if (c.req.method === 'POST' && !isJsonContentType(c.req.header('content-type'))) {
+    return fail(c, 415, 'unsupported_media_type', 'Content-Type must be application/json.');
+  }
+  await next();
+};
+
 export function createApp(options: AppOptions = {}) {
   const now = options.now ?? Date.now;
   const decoders = options.decoders ?? DECODERS;
@@ -73,7 +103,13 @@ export function createApp(options: AppOptions = {}) {
 
   const app = new Hono();
 
-  app.use(requestId());
+  // A fresh id per request. A client-supplied X-Request-Id is ignored, so logs are not steerable.
+  app.use(async (c, next) => {
+    const id = crypto.randomUUID();
+    c.set('requestId', id);
+    c.header('X-Request-Id', id);
+    await next();
+  });
   // An API, read cross-origin by the extension: allow cross-origin reads of the responses.
   app.use(secureHeaders({ crossOriginResourcePolicy: 'cross-origin' }));
   app.use(
@@ -94,6 +130,7 @@ export function createApp(options: AppOptions = {}) {
       );
     });
   }
+  app.use('/score', requireJson);
   if (options.rateLimit) {
     app.use('/score', rateLimit({ now, ...options.rateLimit }));
   }
@@ -157,7 +194,7 @@ export function createApp(options: AppOptions = {}) {
           400,
           'invalid_payload',
           'Payload does not match the contract.',
-          decoded.problems,
+          decoded.problems.slice(0, MAX_PROBLEMS),
         );
       }
 

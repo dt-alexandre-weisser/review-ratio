@@ -1,11 +1,14 @@
 /**
  * Options page: the token, the scope, the server, and a few diagnostics.
  */
+import { diagnose } from '../lib/diagnose.ts';
 import type { Request, Response } from '../lib/messages.ts';
 import {
   DEFAULT_SETTINGS,
+  isValidOrg,
   normalizeServerUrl,
   parseExcludeList,
+  serverUrlProblem,
   type Settings,
 } from '../lib/settings.ts';
 import { Store, chromeStorageArea, type BadgeCache } from '../lib/storage.ts';
@@ -89,56 +92,34 @@ async function busy<T>(button: HTMLButtonElement, task: () => Promise<T>): Promi
 }
 
 async function testConnection(settings: Settings): Promise<void> {
-  const lines: string[] = [];
-  if (!settings.token) {
-    lines.push('GitHub: no token.');
-  } else {
-    const res = await fetch('https://api.github.com/user', {
-      headers: { authorization: `Bearer ${settings.token}`, accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (res.ok) {
-      const user = (await res.json()) as { login: string };
-      const remaining = res.headers.get('x-ratelimit-remaining') ?? '?';
-      lines.push(`GitHub: token works for ${user.login} (${remaining} API calls left this hour).`);
-    } else {
-      lines.push(`GitHub: token rejected (${res.status}).`);
-    }
-  }
-  try {
-    const res = await fetch(`${settings.serverUrl}/health`, {
-      signal: AbortSignal.timeout(10_000),
-    });
-    const body = (await res.json()) as {
-      ok?: boolean;
-      version?: string;
-      contract?: { supported?: number[] };
-    };
-    lines.push(
-      body.ok
-        ? `Server: ${settings.serverUrl} is up (v${body.version ?? '?'}, contract ${body.contract?.supported?.join(', ') ?? '?'}).`
-        : `Server: unexpected answer ${res.status}.`,
-    );
-  } catch (error) {
-    lines.push(
-      `Server: unreachable at ${settings.serverUrl} (${error instanceof Error ? error.message : String(error)}).`,
-    );
-  }
-  setStatus(
-    lines.some((l) => /rejected|unreachable|unexpected|no token/.test(l)) ? 'warn' : 'ok',
-    lines.join('\n'),
-  );
+  const { ok, lines } = await diagnose(settings);
+  setStatus(ok ? 'ok' : 'warn', lines.join('\n'));
 }
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   void busy(buttons.save, async () => {
     const settings = readForm();
+    if (!isValidOrg(settings.org)) {
+      setStatus('error', `"${settings.org}" is not a GitHub organisation name.`);
+      return;
+    }
+    const urlProblem = serverUrlProblem(settings.serverUrl);
+    if (urlProblem) {
+      setStatus('error', `Not saved: ${urlProblem}.`);
+      return;
+    }
     await store.setSettings(settings);
-    // New settings deserve a fresh score: lift the 10-minute throttle for the next page load.
-    await store.updateBadge({ attemptedAt: null });
     fillForm(await store.getSettings());
-    setStatus('ok', 'Saved. The badge refreshes on the next GitHub page load.');
+    setStatus('info', 'Saved. Refreshing the badge…');
+    // New settings deserve a fresh score now, pushed to the open GitHub tabs.
+    const response = await send({ type: 'badge:refresh' });
+    if (response.type === 'badge:view') {
+      setStatus(
+        response.view.stale ? 'warn' : 'ok',
+        `Saved. ${response.view.text}\n${response.view.tooltip}`,
+      );
+    }
     await showDiagnostics();
   });
 });

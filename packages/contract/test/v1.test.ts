@@ -58,14 +58,39 @@ describe('payloadV1', () => {
   });
 
   it('caps the number of records', () => {
-    const up = Array.from({ length: 2001 }, () => validUp);
+    const up = Array.from({ length: 501 }, () => validUp);
     expect(errorsOf(payloadV1({ contractVersion: 1, up, down: [] }))).toContain(
-      'at most length 2000',
-    );
-    const down = Array.from({ length: 501 }, () => validDown);
-    expect(errorsOf(payloadV1({ contractVersion: 1, up: [], down }))).toContain(
       'at most length 500',
     );
+    const down = Array.from({ length: 201 }, () => validDown);
+    expect(errorsOf(payloadV1({ contractVersion: 1, up: [], down }))).toContain(
+      'at most length 200',
+    );
+  });
+});
+
+describe('keys named like Object.prototype members', () => {
+  const keys = [
+    'toString',
+    'constructor',
+    '__proto__',
+    'hasOwnProperty',
+    'valueOf',
+    'isPrototypeOf',
+  ];
+
+  it.each(keys)('rejects %s at every level, as parsed from JSON', (key) => {
+    const up = JSON.stringify(validUp);
+    const down = JSON.stringify(validDown);
+    const variants = [
+      `{"contractVersion":1,"up":[],"down":[],"${key}":"alice"}`,
+      `{"contractVersion":1,"up":[${up.replace('{', `{"${key}":"alice",`)}],"down":[]}`,
+      `{"contractVersion":1,"up":[],"down":[${down.replace('{', `{"${key}":"alice",`)}]}`,
+      `{"contractVersion":1,"up":[${up.replace('"linesByClass":{', `"linesByClass":{"${key}":"alice",`)}],"down":[]}`,
+    ];
+    for (const raw of variants) {
+      expect(errorsOf(payloadV1(JSON.parse(raw))), raw).toContain('free of unknown keys');
+    }
   });
 });
 
@@ -105,6 +130,11 @@ describe('upRecordV1', () => {
     expect(errorsOf(upRecordV1({ ...validUp, t: '2026-10-15T12:30:00Z' }))).toContain(
       'rounded to the hour',
     );
+  });
+
+  it('rejects a timestamp without a UTC zone, which servers would read in local time', () => {
+    expect(errorsOf(upRecordV1({ ...validUp, t: '2026-10-15T12:00:00' }))).toContain('UTC');
+    expect(errorsOf(upRecordV1({ ...validUp, t: '2026-10-15T14:00:00+02:00' }))).toContain('UTC');
   });
 
   it('rejects a non-ISO timestamp', () => {

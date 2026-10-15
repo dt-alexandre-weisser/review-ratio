@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { GitHubAuthError } from '../src/lib/github/client.ts';
+import { GitHubAuthError, GitHubError, GitHubRateLimitError } from '../src/lib/github/client.ts';
 import { isRefreshDue, refresh, refreshIfDue, type RefreshDeps } from '../src/lib/refresh.ts';
 import { ServerError, UpgradeRequiredError, type ServerClient } from '../src/lib/server-client.ts';
 import { DEFAULT_SETTINGS } from '../src/lib/settings.ts';
-import { EMPTY_CACHE, Store } from '../src/lib/storage.ts';
+import { EMPTY_CACHE, STORAGE_VERSION, Store } from '../src/lib/storage.ts';
 import { NOW, fakeGitHub, pr, review } from './helpers/github.ts';
 import { memoryStorage } from './helpers/memory-storage.ts';
 
@@ -26,16 +26,21 @@ function server(overrides: Partial<ServerClient> = {}): ServerClient & { scored:
 async function setup(
   options: {
     token?: string;
+    serverUrl?: string;
     server?: ReturnType<typeof server>;
     github?: ReturnType<typeof fakeGitHub>;
   } = {},
 ) {
   const area = memoryStorage();
   const store = new Store(area);
-  await store.setSettings({ ...DEFAULT_SETTINGS, token: options.token ?? 'tok' });
+  await store.setSettings({
+    ...DEFAULT_SETTINGS,
+    token: options.token ?? 'tok',
+    serverUrl: options.serverUrl ?? DEFAULT_SETTINGS.serverUrl,
+  });
   let clock = NOW;
   const srv = options.server ?? server();
-  const github = options.github ?? fakeGitHub({ prs: [pr({ reviews: [review({ id: 'r1' })] })] });
+  const github = options.github ?? fakeGitHub({ prs: [pr({ myReviews: [review({ id: 'r1' })] })] });
   const deps: RefreshDeps = {
     store,
     now: () => clock,
@@ -55,11 +60,16 @@ describe('isRefreshDue', () => {
     // A refresh started long ago died with its worker; another may start.
     expect(isRefreshDue({ ...EMPTY_CACHE, refreshStartedAt: NOW - 4 * 60_000 }, NOW)).toBe(true);
   });
+
+  it('waits for a GitHub rate limit to reset', () => {
+    expect(isRefreshDue({ ...EMPTY_CACHE, notBefore: NOW + 1 }, NOW)).toBe(false);
+    expect(isRefreshDue({ ...EMPTY_CACHE, notBefore: NOW }, NOW)).toBe(true);
+  });
 });
 
 describe('refresh', () => {
   it('scores the window and caches the result', async () => {
-    const { store, deps, srv } = await setup();
+    const { area, deps, srv } = await setup();
     const cache = await refresh(deps);
     expect(cache).toMatchObject({
       status: 'ok',
@@ -74,13 +84,33 @@ describe('refresh', () => {
       up: [{ action: 'approve' }],
       down: [],
     });
-    expect((await store.getClasses())?.fetchedAt).toBe(NOW);
+    expect(area.data['storageVersion']).toBe(STORAGE_VERSION);
   });
 
   it('does nothing but flag the badge without a token', async () => {
     const { deps, srv } = await setup({ token: '' });
     expect((await refresh(deps)).status).toBe('no_token');
     expect(srv.scored).toHaveLength(0);
+  });
+
+  it('asks the server for the globs first, and spends no GitHub call when it is down', async () => {
+    const github = fakeGitHub({ prs: [] });
+    const viewer = vi.spyOn(github, 'viewer');
+    const { deps } = await setup({
+      github,
+      server: server({
+        fetchClasses: () => Promise.reject(new ServerError('server unreachable', null)),
+      }),
+    });
+    expect((await refresh(deps)).status).toBe('stale');
+    expect(viewer).not.toHaveBeenCalled();
+  });
+
+  it('refuses a remote server over plain http', async () => {
+    const { deps, srv } = await setup({ serverUrl: 'http://rr.example.com' });
+    const cache = await refresh(deps);
+    expect(cache).toMatchObject({ status: 'stale', error: expect.stringContaining('https') });
+    expect(srv.fetchClasses).not.toHaveBeenCalled();
   });
 
   it('keeps the last score and marks it stale when the server is down', async () => {
@@ -113,32 +143,47 @@ describe('refresh', () => {
     expect((await refresh(deps)).status).toBe('bad_token');
   });
 
-  it('reuses cached class globs within a day, and when the server cannot serve new ones', async () => {
-    const srv = server();
-    const { deps, advance } = await setup({ server: srv });
-    await refresh(deps);
-    advance(60 * 60_000);
-    await refresh(deps);
-    expect(srv.fetchClasses).toHaveBeenCalledTimes(1);
-    advance(24 * 60 * 60_000);
-    srv.fetchClasses = vi.fn(() => Promise.reject(new ServerError('down', 503)));
-    expect((await refresh(deps)).status).toBe('ok');
-  });
+  it('flags GitHub errors apart from server errors, and backs off until a rate limit resets', async () => {
+    const down = fakeGitHub({ prs: [] });
+    down.viewer = () => Promise.reject(new GitHubError('GitHub answered 502', 502));
+    const first = await setup({ github: down });
+    expect(await refresh(first.deps)).toMatchObject({ status: 'github_error', notBefore: null });
 
-  it('fails stale when there are no class globs at all', async () => {
-    const { deps } = await setup({
-      server: server({ fetchClasses: () => Promise.reject(new ServerError('down', 503)) }),
+    const limited = fakeGitHub({ prs: [] });
+    limited.viewer = () => Promise.reject(new GitHubRateLimitError(NOW + 30 * 60_000));
+    const second = await setup({ github: limited });
+    expect(await refresh(second.deps)).toMatchObject({
+      status: 'github_error',
+      notBefore: NOW + 30 * 60_000,
     });
-    expect((await refresh(deps)).status).toBe('stale');
+    second.advance(20 * 60_000);
+    expect((await refreshIfDue(second.deps)).refreshed).toBe(false);
   });
 
-  it('stores PR keys and Viewed snapshots', async () => {
+  it('reports PRs it had to skip without failing', async () => {
+    const github = fakeGitHub({
+      prs: [1, 2, 3].map((n) => pr({ number: n, myReviews: [review()] })),
+    });
+    const base = github.pullRequest;
+    github.pullRequest = (o, r, n, me) =>
+      n === 2 ? Promise.reject(new GitHubError('not found', 404)) : base(o, r, n, me);
+    const { deps } = await setup({ github });
+    expect(await refresh(deps)).toMatchObject({
+      status: 'ok',
+      error: '1 pull request(s) could not be read',
+    });
+  });
+
+  it('stores PR keys, Viewed snapshots and the compare cache', async () => {
     const github = fakeGitHub({
       prs: [
         pr({
           number: 1,
-          files: [{ path: 'a.ts', additions: 10, deletions: 0, viewerViewedState: 'VIEWED' }],
-          reviews: [review({ id: 'r1' })],
+          files: [{ path: 'src/app.ts', additions: 10, deletions: 0, viewerViewedState: 'VIEWED' }],
+          myReviews: [
+            review({ id: 'r0', commitOid: 'c0', submittedAt: '2026-10-15T08:00:00Z' }),
+            review({ id: 'r1' }),
+          ],
         }),
         pr({ number: 2, author: { login: 'me', type: 'User' } }),
       ],
@@ -149,6 +194,10 @@ describe('refresh', () => {
       'dilitrust/app#2': '00000000-0000-4000-8000-000000000001',
     });
     expect(Object.keys(await store.getViewedSnapshots())).toEqual(['r1']);
+    expect(Object.keys(await store.getCompareCache()).sort()).toEqual([
+      'dilitrust/app:c0...head',
+      'dilitrust/app:fork...c0',
+    ]);
   });
 });
 

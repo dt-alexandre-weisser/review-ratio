@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { roundHours, roundLines, roundToHour } from '../src/index.ts';
+import { ceilHours, roundLines, roundToHour } from '../src/index.ts';
 
 describe('roundToHour', () => {
   it('rounds to the nearest hour', () => {
@@ -50,11 +50,13 @@ describe('roundLines', () => {
   });
 });
 
-describe('roundHours', () => {
-  it('rounds to the nearest integer and clamps at 0', () => {
-    expect(roundHours(47.4)).toBe(47);
-    expect(roundHours(47.5)).toBe(48);
-    expect(roundHours(-1)).toBe(0);
-    expect(roundHours(Number.NaN)).toBe(0);
+describe('ceilHours', () => {
+  it('rounds up so that "more than N hours" stays exact', () => {
+    expect(ceilHours(48)).toBe(48);
+    expect(ceilHours(48.01)).toBe(49);
+    expect(ceilHours(47.5)).toBe(48);
+    expect(ceilHours(0)).toBe(0);
+    expect(ceilHours(-1)).toBe(0);
+    expect(ceilHours(Number.NaN)).toBe(0);
   });
 });

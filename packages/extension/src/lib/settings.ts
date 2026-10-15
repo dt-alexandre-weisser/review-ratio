@@ -65,3 +65,28 @@ export function coerceSettings(raw: unknown): Settings {
         : DEFAULT_SETTINGS.serverUrl,
   };
 }
+
+/** GitHub organisation names: letters, digits and single hyphens, 1 to 39 characters. */
+export function isValidOrg(org: string): boolean {
+  return /^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i.test(org);
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * Why a server URL cannot be used, or `null` when it can. Plain HTTP is allowed for the local
+ * prototype server only: anything remote must use HTTPS.
+ */
+export function serverUrlProblem(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'the server URL is not a valid URL';
+  }
+  if (parsed.username || parsed.password) return 'the server URL must not contain credentials';
+  if (parsed.search || parsed.hash) return 'the server URL must not have a query or fragment';
+  if (parsed.protocol === 'https:') return null;
+  if (parsed.protocol === 'http:' && LOOPBACK_HOSTS.has(parsed.hostname)) return null;
+  return 'a remote server URL must use https';
+}

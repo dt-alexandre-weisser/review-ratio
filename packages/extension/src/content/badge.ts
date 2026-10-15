@@ -5,13 +5,14 @@ import type { BadgeView } from '../lib/badge-state.ts';
 
 export const BADGE_ID = 'review-ratio-badge';
 
-/** Where the badge goes, in order of preference. The first container found wins. */
-const SLOT_SELECTORS = [
-  '.AppHeader-globalBar-end',
-  'header .AppHeader-actions',
-  'header[role="banner"]',
-  'header',
-];
+/**
+ * Where the badge goes, in order of preference. GitHub's own header containers only: a bare
+ * `header` would match unrelated page content.
+ */
+const SLOT_SELECTORS = ['.AppHeader-globalBar-end', '.AppHeader-actions'];
+
+/** The view last rendered into each badge element, to skip identical re-renders. */
+const rendered = new WeakMap<Element, string>();
 
 export function findSlot(doc: Document): Element | null {
   for (const selector of SLOT_SELECTORS) {
@@ -22,6 +23,10 @@ export function findSlot(doc: Document): Element | null {
 }
 
 export function render(el: HTMLElement, view: BadgeView): void {
+  const key = JSON.stringify(view);
+  if (rendered.get(el) === key) return;
+  rendered.set(el, key);
+
   let full = el.querySelector<HTMLElement>('.review-ratio-full');
   let short = el.querySelector<HTMLElement>('.review-ratio-short');
   if (!full || !short) {
@@ -49,7 +54,7 @@ export function mount(doc: Document, view: BadgeView): HTMLElement | null {
     el = doc.createElement('span');
     el.id = BADGE_ID;
     el.className = 'review-ratio-badge';
-    el.setAttribute('role', 'status');
+    // A plain labelled element, not a live region: screen readers are not interrupted by it.
     slot.prepend(el);
   }
   render(el, view);

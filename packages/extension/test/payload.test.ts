@@ -25,20 +25,25 @@ describe('hashUnit', () => {
 });
 
 describe('roundLinesByClass', () => {
-  it('rounds to multiples of 10, stable per seed, dropping zeros', () => {
-    const lines = { production: 1234, test: 3, docs: 0 };
+  it('rounds to the nearest 10 by default, so equal sizes round alike', () => {
+    expect(roundLinesByClass({ production: 15, test: 4, docs: 0 })).toEqual({ production: 20 });
+    expect(roundLinesByClass({ production: 1234 })).toEqual({ production: 1230 });
+  });
+
+  it('rounds without bias when seeded, stable per seed', () => {
+    const lines = { production: 1234, test: 3 };
     const a = roundLinesByClass(lines, 'seed');
     expect(a).toEqual(roundLinesByClass(lines, 'seed'));
     expect([1230, 1240]).toContain(a.production);
     expect([undefined, 10]).toContain(a.test);
-    expect(a.docs).toBeUndefined();
   });
 
-  it('keeps the expected value of small counts', () => {
+  it('keeps the expected value of small seeded counts', () => {
     let sum = 0;
     const n = 4000;
-    for (let i = 0; i < n; i += 1)
+    for (let i = 0; i < n; i += 1) {
       sum += roundLinesByClass({ production: 2 }, `r${i}`).production ?? 0;
+    }
     expect(sum / n).toBeGreaterThan(1.7);
     expect(sum / n).toBeLessThan(2.3);
   });
@@ -55,7 +60,7 @@ describe('buildPayload', () => {
           linesByClass: { production: 400 },
           commentedLinesByClass: { production: 20 },
           viewedLinesByClass: {},
-          waitedHoursWithoutReview: 49.6,
+          waitedHoursWithoutReview: 48.2,
         },
       ],
       [
@@ -83,7 +88,7 @@ describe('buildPayload', () => {
           linesByClass: { production: 400 },
           commentedLinesByClass: { production: 20 },
           viewedLinesByClass: {},
-          waitedHoursWithoutReview: 50,
+          waitedHoursWithoutReview: 49,
         },
       ],
       down: [
@@ -127,5 +132,34 @@ describe('buildPayload', () => {
         [{ prKey: 'DiliTrust/app#1', readyAtMs: NOW, closedAtMs: null, linesByClass: {} }],
       ),
     ).toThrow(/contract/);
+  });
+});
+
+describe('buildPayload and the anchor invariant', () => {
+  it('rounds an approve and an own PR of the same size the same way', () => {
+    for (const lines of [5, 14, 15, 25, 333, 404, 405]) {
+      const payload = buildPayload(
+        [
+          {
+            reviewId: `r-${lines}`,
+            tMs: NOW,
+            action: 'approve',
+            linesByClass: { production: lines },
+            commentedLinesByClass: {},
+            viewedLinesByClass: {},
+            waitedHoursWithoutReview: 0,
+          },
+        ],
+        [
+          {
+            prKey: '0f6f9a1e-5a7d-4c1b-9d2e-2b1d8c3f4a5b',
+            readyAtMs: NOW,
+            closedAtMs: null,
+            linesByClass: { production: lines },
+          },
+        ],
+      );
+      expect(payload.up[0]!.linesByClass, `lines=${lines}`).toEqual(payload.down[0]!.linesByClass);
+    }
   });
 });

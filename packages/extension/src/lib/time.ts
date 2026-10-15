@@ -7,8 +7,6 @@ export const WINDOW_MS = 7 * DAY_MS;
 export const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 /** A refresh older than this is considered dead and another one may start. */
 export const REFRESH_LOCK_MS = 3 * 60 * 1000;
-/** The published class globs are re-fetched after this long. */
-export const CLASSES_TTL_MS = DAY_MS;
 
 export function hoursBetween(fromMs: number, toMs: number): number {
   return (toMs - fromMs) / HOUR_MS;

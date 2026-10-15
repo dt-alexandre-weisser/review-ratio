@@ -6,6 +6,7 @@
  * server clock, and returns numbers. See DESIGN.md › Formula for the rationale of each term.
  */
 import {
+  FILE_CLASSES,
   HOUR_MS,
   type FileClass,
   type LinesByClassV1,
@@ -49,6 +50,11 @@ export const PARAMETERS = {
   /** Decay: 1.0 for the first 24h, then linear down to `decayFloor` at day 7, then 0. */
   decayFullHours: DAY_HOURS,
   decayFloor: 0.3,
+  /**
+   * A record dated up to this far in the future counts as age 0: the extension rounds times to
+   * the nearest hour, and clocks drift. Further in the future, the record counts for nothing.
+   */
+  futureToleranceHours: 2,
   /** Size malus tiers of ↓, applied to marginal weighted lines. */
   sizeTiers: [
     { upTo: 400, factor: 1.0 },
@@ -57,21 +63,20 @@ export const PARAMETERS = {
   ],
 } as const;
 
-/** Σ classWeight × lines over a lines-by-class record. */
+/** Σ classWeight × lines over a lines-by-class record. Reads the known classes only. */
 export function weightedLines(lines: LinesByClassV1): number {
   let total = 0;
-  for (const [cls, count] of Object.entries(lines) as [FileClass, number | undefined][]) {
-    total += CLASS_WEIGHTS[cls] * (count ?? 0);
-  }
+  for (const cls of FILE_CLASSES) total += CLASS_WEIGHTS[cls] * (lines[cls] ?? 0);
   return total;
 }
 
 /**
  * Decay by age in hours. 1.0 during the first 24h, then linear down to 0.3 at day 7, then 0.
- * A negative age (clock skew, hour rounding) counts as 0.
+ * A small negative age (hour rounding, clock drift) counts as 0; a record further in the future
+ * than `futureToleranceHours` counts for nothing, so a forged date cannot avoid the decay.
  */
 export function decay(ageHours: number): number {
-  if (!Number.isFinite(ageHours)) return 0;
+  if (!Number.isFinite(ageHours) || ageHours < -PARAMETERS.futureToleranceHours) return 0;
   const age = Math.max(0, ageHours);
   if (age <= PARAMETERS.decayFullHours) return 1;
   if (age >= WINDOW_HOURS) return 0;
@@ -138,6 +143,9 @@ export function score(payload: Payload, nowMs: number): Score {
   for (const record of payload.up) up += scoreUp(record, nowMs);
   let down = 0;
   for (const record of payload.down) down += scoreDown(record, nowMs);
+  if (!Number.isFinite(up) || !Number.isFinite(down)) {
+    throw new RangeError('score is not finite');
+  }
   up = round(up, 0);
   down = round(down, 0);
   return { up, down, ratio: down === 0 ? null : round(up / down, 2) };

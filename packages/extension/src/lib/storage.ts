@@ -1,16 +1,30 @@
 /**
  * Typed access to `chrome.storage.local`. Everything the extension remembers lives here:
- * settings, the cached badge, the class globs, the random PR keys and the Viewed snapshots.
+ * settings, the cached badge, the random PR keys, the Viewed snapshots and the compare cache.
+ *
+ * Everything read back is validated: a value written by another build, or corrupted, is dropped
+ * instead of breaking every refresh.
  */
-import type { FileClass, LinesByClassV1, ScoreResponseV1 } from '@review-ratio/contract';
+import {
+  FILE_CLASSES,
+  type FileClass,
+  type LinesByClassV1,
+  type ScoreResponseV1,
+} from '@review-ratio/contract';
 
+import type { CompareFile } from './github/types.ts';
 import { coerceSettings, type Settings } from './settings.ts';
+
+/** Bump when the shape of stored activity data changes; older data is then forgotten. */
+export const STORAGE_VERSION = 2;
 
 export type BadgeStatus =
   /** The last refresh succeeded. */
   | 'ok'
-  /** The server could not be reached or answered an error. The score, if any, is old. */
+  /** The review-ratio server could not be reached or answered an error. */
   | 'stale'
+  /** GitHub could not be read: unreachable, rate limited, or a permission is missing. */
+  | 'github_error'
   /** The server retired our contract major. */
   | 'upgrade_required'
   /** No token configured yet. */
@@ -28,6 +42,8 @@ export interface BadgeCache {
   attemptedAt: number | null;
   /** When a refresh was last started. A stale value means a worker died mid-refresh. */
   refreshStartedAt: number | null;
+  /** No refresh before this time, e.g. until GitHub's rate limit resets. */
+  notBefore: number | null;
   /** Short description of the last failure, for the tooltip and the options page. */
   error: string | null;
 }
@@ -38,6 +54,7 @@ export const EMPTY_CACHE: Readonly<BadgeCache> = Object.freeze({
   scoredAt: null,
   attemptedAt: null,
   refreshStartedAt: null,
+  notBefore: null,
   error: null,
 });
 
@@ -46,25 +63,10 @@ export interface PublishedClass {
   globs: string[];
 }
 
-export interface ClassesCache {
-  classes: PublishedClass[];
-  fetchedAt: number;
-}
-
-/** Snapshot of the files I had marked Viewed when a review's commit was still the PR head. */
+/** The files of my reviewed range I had marked Viewed, by class. */
 export interface ViewedSnapshot {
   linesByClass: LinesByClassV1;
   takenAt: number;
-}
-
-export interface StorageShape {
-  settings: Settings;
-  badge: BadgeCache;
-  classes: ClassesCache | null;
-  /** Random key per PR I own, keyed by `owner/repo#number`. Never leaves the browser. */
-  prKeys: Record<string, string>;
-  /** Viewed snapshots keyed by review node id. */
-  viewedSnapshots: Record<string, ViewedSnapshot>;
 }
 
 /** The subset of `chrome.storage.local` the extension uses. Injected for tests. */
@@ -74,8 +76,96 @@ export interface StorageArea {
   remove(keys: string[]): Promise<void>;
 }
 
+const ACTIVITY_KEYS = ['badge', 'prKeys', 'viewedSnapshots', 'compareCache', 'classes'];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isFinite(value));
+}
+
+export function isLinesByClass(value: unknown): value is LinesByClassV1 {
+  if (!isRecord(value)) return false;
+  return Object.entries(value).every(
+    ([key, n]) => (FILE_CLASSES as readonly string[]).includes(key) && isCount(n),
+  );
+}
+
+function isScore(value: unknown): value is ScoreResponseV1 {
+  return (
+    isRecord(value) &&
+    isCount(value['up']) &&
+    isCount(value['down']) &&
+    (value['ratio'] === null || isCount(value['ratio']))
+  );
+}
+
+const STATUSES: ReadonlySet<string> = new Set<BadgeStatus>([
+  'ok',
+  'stale',
+  'github_error',
+  'upgrade_required',
+  'no_token',
+  'bad_token',
+]);
+
+export function coerceBadge(raw: unknown): BadgeCache {
+  if (!isRecord(raw)) return { ...EMPTY_CACHE };
+  const pick = (key: keyof BadgeCache) => (isNullableNumber(raw[key]) ? raw[key] : null);
+  return {
+    status:
+      typeof raw['status'] === 'string' && STATUSES.has(raw['status'])
+        ? (raw['status'] as BadgeStatus)
+        : EMPTY_CACHE.status,
+    score: isScore(raw['score']) ? raw['score'] : null,
+    scoredAt: pick('scoredAt'),
+    attemptedAt: pick('attemptedAt'),
+    refreshStartedAt: pick('refreshStartedAt'),
+    notBefore: pick('notBefore'),
+    error: typeof raw['error'] === 'string' ? raw['error'] : null,
+  };
+}
+
+/** Keeps the entries whose value passes `valid`. */
+function filterRecord<T>(
+  raw: unknown,
+  valid: (key: string, value: unknown) => boolean,
+): Record<string, T> {
+  if (!isRecord(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).filter(([k, v]) => valid(k, v))) as Record<
+    string,
+    T
+  >;
+}
+
+function isSnapshot(value: unknown): value is ViewedSnapshot {
+  return isRecord(value) && isLinesByClass(value['linesByClass']) && isCount(value['takenAt']);
+}
+
+function isCompareFiles(value: unknown): value is CompareFile[] {
+  return (
+    Array.isArray(value) &&
+    value.every((f) => isRecord(f) && typeof f['filename'] === 'string' && isCount(f['changes']))
+  );
+}
+
 export class Store {
   constructor(private readonly area: StorageArea) {}
+
+  /** Forgets activity data written by an older storage layout. */
+  async migrate(): Promise<void> {
+    const { storageVersion } = await this.area.get(['storageVersion']);
+    if (storageVersion === STORAGE_VERSION) return;
+    await this.area.remove(ACTIVITY_KEYS);
+    await this.area.set({ storageVersion: STORAGE_VERSION });
+  }
 
   async getSettings(): Promise<Settings> {
     const { settings } = await this.area.get(['settings']);
@@ -88,33 +178,18 @@ export class Store {
 
   async getBadge(): Promise<BadgeCache> {
     const { badge } = await this.area.get(['badge']);
-    return { ...EMPTY_CACHE, ...(isRecord(badge) ? (badge as Partial<BadgeCache>) : {}) };
-  }
-
-  async setBadge(badge: BadgeCache): Promise<void> {
-    await this.area.set({ badge });
+    return coerceBadge(badge);
   }
 
   async updateBadge(patch: Partial<BadgeCache>): Promise<BadgeCache> {
     const next = { ...(await this.getBadge()), ...patch };
-    await this.setBadge(next);
+    await this.area.set({ badge: next });
     return next;
-  }
-
-  async getClasses(): Promise<ClassesCache | null> {
-    const { classes } = await this.area.get(['classes']);
-    return isRecord(classes) && Array.isArray(classes['classes'])
-      ? (classes as unknown as ClassesCache)
-      : null;
-  }
-
-  async setClasses(classes: ClassesCache): Promise<void> {
-    await this.area.set({ classes });
   }
 
   async getPrKeys(): Promise<Record<string, string>> {
     const { prKeys } = await this.area.get(['prKeys']);
-    return isRecord(prKeys) ? (prKeys as Record<string, string>) : {};
+    return filterRecord<string>(prKeys, (_k, v) => typeof v === 'string' && UUID.test(v));
   }
 
   async setPrKeys(prKeys: Record<string, string>): Promise<void> {
@@ -123,21 +198,26 @@ export class Store {
 
   async getViewedSnapshots(): Promise<Record<string, ViewedSnapshot>> {
     const { viewedSnapshots } = await this.area.get(['viewedSnapshots']);
-    return isRecord(viewedSnapshots) ? (viewedSnapshots as Record<string, ViewedSnapshot>) : {};
+    return filterRecord<ViewedSnapshot>(viewedSnapshots, (_k, v) => isSnapshot(v));
   }
 
   async setViewedSnapshots(snapshots: Record<string, ViewedSnapshot>): Promise<void> {
     await this.area.set({ viewedSnapshots: snapshots });
   }
 
+  async getCompareCache(): Promise<Record<string, CompareFile[]>> {
+    const { compareCache } = await this.area.get(['compareCache']);
+    return filterRecord<CompareFile[]>(compareCache, (_k, v) => isCompareFiles(v));
+  }
+
+  async setCompareCache(cache: Record<string, CompareFile[]>): Promise<void> {
+    await this.area.set({ compareCache: cache });
+  }
+
   /** Forgets everything but the settings. */
   async clearActivity(): Promise<void> {
-    await this.area.remove(['badge', 'classes', 'prKeys', 'viewedSnapshots']);
+    await this.area.remove(ACTIVITY_KEYS);
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** The real `chrome.storage.local`, wrapped in promises. */

@@ -2,46 +2,42 @@
  * Node entry point. `pnpm dev:server` runs it on a fixed localhost port so the extension can
  * declare the host permission. The same app runs on Cloud Run through this file.
  *
- * Environment:
- * - `PORT` (default 8787), `HOST` (default 127.0.0.1; set 0.0.0.0 in a container).
- * - `TRUSTED_PROXY_HOPS` (default 0): number of proxies in front of the server that append to
- *   `X-Forwarded-For`. 0 keys the rate limit on the socket address. Behind Cloud Run, use 1.
+ * Environment (see config.ts):
+ * - `PORT` (default 8787), `HOST` (default 127.0.0.1; 0.0.0.0 in a container).
+ * - `TRUSTED_PROXY_HOPS`: required unless HOST is a loopback address. 0 keys the rate limit on
+ *   the socket address; N keys it on the N-th `X-Forwarded-For` entry from the end.
  */
 import { serve } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
 
 import { createApp } from './app.ts';
+import { loadConfig } from './config.ts';
 import { SCORE_RATE_LIMIT } from './limits.ts';
 import { forwardedClientIp } from './rate-limit.ts';
 
-export const DEFAULT_PORT = 8787;
-
-function intFromEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') return fallback;
-  const value = Number.parseInt(raw, 10);
-  if (!Number.isInteger(value) || value < 0) {
-    throw new Error(`${name} must be a non-negative integer, got "${raw}"`);
-  }
-  return value;
+let config;
+try {
+  config = loadConfig(process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
 }
-
-const port = intFromEnv('PORT', DEFAULT_PORT);
-const hostname = process.env['HOST'] ?? '127.0.0.1';
-const trustedHops = intFromEnv('TRUSTED_PROXY_HOPS', 0);
+const { port, host, trustedProxyHops } = config;
 
 const app = createApp({
   rateLimit: {
     ...SCORE_RATE_LIMIT,
     keyOf: (c) =>
-      forwardedClientIp(c.req.header('x-forwarded-for'), trustedHops) ??
+      forwardedClientIp(c.req.header('x-forwarded-for'), trustedProxyHops) ??
       getConnInfo(c).remote.address ??
       'unknown',
   },
 });
 
-const server = serve({ fetch: app.fetch, port, hostname }, (info) => {
-  console.info(`review-ratio server listening on http://${info.address}:${info.port}`);
+const server = serve({ fetch: app.fetch, port, hostname: host }, (info) => {
+  console.info(
+    `review-ratio server listening on http://${info.address}:${info.port} (trusted proxy hops: ${trustedProxyHops})`,
+  );
 });
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

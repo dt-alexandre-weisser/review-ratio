@@ -46,26 +46,27 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler {
   const buckets = new Map<string, Bucket>();
   let lastSweep = 0;
 
-  function sweep(at: number): void {
-    if (at - lastSweep < options.windowMs && buckets.size < maxKeys) return;
+  /** Drops expired buckets, at most once per window: O(keys) amortised over a window. */
+  function sweepExpired(at: number): void {
+    if (at - lastSweep < options.windowMs) return;
     lastSweep = at;
     for (const [key, bucket] of buckets) {
       if (bucket.resetAt <= at) buckets.delete(key);
-    }
-    // Still full: drop the oldest buckets. A Map iterates in insertion order.
-    for (const key of buckets.keys()) {
-      if (buckets.size < maxKeys) break;
-      buckets.delete(key);
     }
   }
 
   return async (c, next) => {
     const at = now();
-    sweep(at);
+    sweepExpired(at);
     const key = options.keyOf(c);
     let bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= at) {
       buckets.delete(key);
+      // Full: evict the oldest bucket. A Map iterates in insertion order, so this is O(1).
+      if (buckets.size >= maxKeys) {
+        const oldest = buckets.keys().next();
+        if (!oldest.done) buckets.delete(oldest.value);
+      }
       bucket = { count: 0, resetAt: at + options.windowMs };
       buckets.set(key, bucket);
     }

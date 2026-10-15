@@ -9,6 +9,37 @@ import {
 } from '../src/lib/github/client.ts';
 import { fakeFetch, json } from './helpers/fetch.ts';
 
+const MY_REVIEW = {
+  id: 'R1',
+  state: 'APPROVED',
+  submittedAt: '2026-10-14T12:00:00Z',
+  body: '',
+  author: { login: 'me', __typename: 'User' },
+  commit: { oid: 'h' },
+  comments: {
+    nodes: [
+      {
+        id: 'C1',
+        path: 'a.ts',
+        line: 3,
+        startLine: 1,
+        originalLine: 3,
+        originalStartLine: 1,
+        replyTo: null,
+      },
+      {
+        id: 'C2',
+        path: 'a.ts',
+        line: 3,
+        startLine: null,
+        originalLine: 3,
+        originalStartLine: null,
+        replyTo: { id: 'C0' },
+      },
+    ],
+  },
+};
+
 function rawPr(overrides: Record<string, unknown> = {}) {
   return {
     number: 7,
@@ -21,45 +52,28 @@ function rawPr(overrides: Record<string, unknown> = {}) {
     author: { login: 'alice', __typename: 'User' },
     assignees: { nodes: [{ login: 'me' }] },
     timelineItems: { nodes: [{ createdAt: '2026-10-14T11:00:00Z' }] },
+    commits: { nodes: [{ commit: { parents: { nodes: [{ oid: 'fork' }] } } }] },
     files: {
       pageInfo: { hasNextPage: false, endCursor: null },
       nodes: [{ path: 'a.ts', additions: 3, deletions: 1, viewerViewedState: 'VIEWED' }],
     },
     reviews: {
-      pageInfo: { hasNextPage: false, endCursor: null },
       nodes: [
+        {
+          id: 'R0',
+          state: 'COMMENTED',
+          submittedAt: '2026-10-14T11:30:00Z',
+          author: { login: 'bob', __typename: 'User' },
+        },
         {
           id: 'R1',
           state: 'APPROVED',
           submittedAt: '2026-10-14T12:00:00Z',
-          body: '',
           author: { login: 'me', __typename: 'User' },
-          commit: { oid: 'h' },
-          comments: {
-            nodes: [
-              {
-                id: 'C1',
-                path: 'a.ts',
-                line: 3,
-                startLine: 1,
-                originalLine: 3,
-                originalStartLine: 1,
-                replyTo: null,
-              },
-              {
-                id: 'C2',
-                path: 'a.ts',
-                line: 3,
-                startLine: null,
-                originalLine: 3,
-                originalStartLine: null,
-                replyTo: { id: 'C0' },
-              },
-            ],
-          },
         },
       ],
     },
+    myReviews: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [MY_REVIEW] },
     ...overrides,
   };
 }
@@ -109,6 +123,21 @@ describe('createGitHubClient', () => {
       fetchImpl: fakeFetch(() => json({}, { status: 429, headers: { 'retry-after': '60' } })),
     });
     await expect(secondary.viewer()).rejects.toBeInstanceOf(GitHubRateLimitError);
+
+    // Secondary rate limits answer 403 with retry-after and remaining calls left.
+    const abuse = createGitHubClient({
+      token: 't',
+      fetchImpl: fakeFetch(() =>
+        json(
+          {},
+          { status: 403, headers: { 'retry-after': '30', 'x-ratelimit-remaining': '4000' } },
+        ),
+      ),
+    });
+    const before = Date.now();
+    const abuseError = (await abuse.viewer().catch((e: unknown) => e)) as GitHubRateLimitError;
+    expect(abuseError).toBeInstanceOf(GitHubRateLimitError);
+    expect(abuseError.resetAtMs).toBeGreaterThanOrEqual(before + 30_000);
   });
 
   it('wraps network failures and other errors', async () => {
@@ -171,11 +200,12 @@ describe('createGitHubClient', () => {
   it('reads a pull request with one GraphQL query and maps it', async () => {
     const fetchImpl = fakeFetch(() => json({ data: { repository: { pullRequest: rawPr() } } }));
     const client = createGitHubClient({ token: 't', fetchImpl });
-    const details = await client.pullRequest('DiliTrust', 'app', 7);
+    const details = await client.pullRequest('DiliTrust', 'app', 7, 'Me');
     expect(fetchImpl.calls).toHaveLength(1);
     expect(fetchImpl.calls[0]!.url).toBe('https://api.github.com/graphql');
     const sent = JSON.parse(fetchImpl.calls[0]!.init.body as string);
-    expect(sent.variables).toEqual({ owner: 'DiliTrust', name: 'app', number: 7 });
+    expect(sent.variables).toEqual({ owner: 'DiliTrust', name: 'app', number: 7, me: 'Me' });
+    expect(sent.query).toContain('myReviews: reviews(first: 50, author: $me)');
     expect(details).toMatchObject({
       owner: 'DiliTrust',
       repo: 'app',
@@ -185,23 +215,32 @@ describe('createGitHubClient', () => {
       readyForReviewAt: '2026-10-14T11:00:00Z',
       headRefOid: 'h',
       baseRefOid: 'b',
+      forkOid: 'fork',
       files: [{ path: 'a.ts', additions: 3, deletions: 1, viewerViewedState: 'VIEWED' }],
     });
-    expect(details.reviews[0]).toMatchObject({
+    expect(details.reviews.map((r) => r.id)).toEqual(['R0', 'R1']);
+    expect(details.reviews[0]).toEqual({
+      id: 'R0',
+      state: 'COMMENTED',
+      submittedAt: '2026-10-14T11:30:00Z',
+      author: { login: 'bob', type: 'User' },
+    });
+    expect(details.myReviews[0]).toMatchObject({
       id: 'R1',
       commitOid: 'h',
       author: { login: 'me', type: 'User' },
     });
-    expect(details.reviews[0]!.comments.map((c) => c.isReply)).toEqual([false, true]);
+    expect(details.myReviews[0]!.comments.map((c) => c.isReply)).toEqual([false, true]);
   });
 
-  it('follows the files and reviews pages', async () => {
+  it('follows the files and my reviews pages, with only the declared variables', async () => {
     const fetchImpl = fakeFetch((_url, init) => {
       const { query, variables } = JSON.parse(init.body as string) as {
         query: string;
-        variables: { after?: string };
+        variables: Record<string, unknown>;
       };
       if (query.startsWith('query PullRequestFiles')) {
+        expect(variables).toEqual({ owner: 'o', name: 'r', number: 1, after: 'file-cursor' });
         return json({
           data: {
             repository: {
@@ -217,15 +256,21 @@ describe('createGitHubClient', () => {
           },
         });
       }
-      if (query.startsWith('query PullRequestReviews')) {
-        expect(variables.after).toBe('rev-cursor');
+      if (query.startsWith('query PullRequestMyReviews')) {
+        expect(variables).toEqual({
+          owner: 'o',
+          name: 'r',
+          number: 1,
+          me: 'me',
+          after: 'rev-cursor',
+        });
         return json({
           data: {
             repository: {
               pullRequest: {
-                reviews: {
+                myReviews: {
                   pageInfo: { hasNextPage: false, endCursor: null },
-                  nodes: [{ ...rawPr().reviews.nodes[0], id: 'R2', author: null, commit: null }],
+                  nodes: [{ ...MY_REVIEW, id: 'R2', author: null, commit: null }],
                 },
               },
             },
@@ -238,12 +283,13 @@ describe('createGitHubClient', () => {
             pullRequest: rawPr({
               author: { login: 'renovate', __typename: 'Bot' },
               timelineItems: { nodes: [] },
+              commits: { nodes: [] },
               files: {
                 ...rawPr().files,
                 pageInfo: { hasNextPage: true, endCursor: 'file-cursor' },
               },
-              reviews: {
-                ...rawPr().reviews,
+              myReviews: {
+                ...rawPr().myReviews,
                 pageInfo: { hasNextPage: true, endCursor: 'rev-cursor' },
               },
             }),
@@ -252,13 +298,14 @@ describe('createGitHubClient', () => {
       });
     });
     const client = createGitHubClient({ token: 't', fetchImpl });
-    const details = await client.pullRequest('o', 'r', 1);
+    const details = await client.pullRequest('o', 'r', 1, 'me');
     expect(fetchImpl.calls).toHaveLength(3);
     expect(details.files.map((f) => f.path)).toEqual(['a.ts', 'b.ts']);
-    expect(details.reviews.map((r) => r.id)).toEqual(['R1', 'R2']);
-    expect(details.reviews[1]).toMatchObject({ author: null, commitOid: null });
+    expect(details.myReviews.map((r) => r.id)).toEqual(['R1', 'R2']);
+    expect(details.myReviews[1]).toMatchObject({ author: null, commitOid: null });
     expect(details.author).toEqual({ login: 'renovate', type: 'Bot' });
     expect(details.readyForReviewAt).toBeNull();
+    expect(details.forkOid).toBeNull();
   });
 
   it('reports GraphQL errors and missing pull requests', async () => {
@@ -266,24 +313,24 @@ describe('createGitHubClient', () => {
       token: 't',
       fetchImpl: fakeFetch(() => json({ data: { repository: { pullRequest: null } } })),
     });
-    await expect(notFound.pullRequest('o', 'r', 1)).rejects.toMatchObject({ status: 404 });
+    await expect(notFound.pullRequest('o', 'r', 1, 'me')).rejects.toMatchObject({ status: 404 });
     const erroring = createGitHubClient({
       token: 't',
       fetchImpl: fakeFetch(() => json({ errors: [{ message: 'nope', type: 'NOT_FOUND' }] })),
     });
-    await expect(erroring.pullRequest('o', 'r', 1)).rejects.toMatchObject({ status: 404 });
+    await expect(erroring.pullRequest('o', 'r', 1, 'me')).rejects.toMatchObject({ status: 404 });
     const other = createGitHubClient({
       token: 't',
       fetchImpl: fakeFetch(() => json({ errors: [{ message: 'boom' }] })),
     });
-    await expect(other.pullRequest('o', 'r', 1)).rejects.toThrow(/boom/);
+    await expect(other.pullRequest('o', 'r', 1, 'me')).rejects.toThrow(/boom/);
     const empty = createGitHubClient({ token: 't', fetchImpl: fakeFetch(() => json({})) });
-    await expect(empty.pullRequest('o', 'r', 1)).rejects.toThrow(/without data/);
+    await expect(empty.pullRequest('o', 'r', 1, 'me')).rejects.toThrow(/without data/);
     const http = createGitHubClient({
       token: 't',
       fetchImpl: fakeFetch(() => json({}, { status: 502 })),
     });
-    await expect(http.pullRequest('o', 'r', 1)).rejects.toMatchObject({ status: 502 });
+    await expect(http.pullRequest('o', 'r', 1, 'me')).rejects.toMatchObject({ status: 502 });
   });
 
   it('compares two commits in one request and returns null when GitHub cannot', async () => {

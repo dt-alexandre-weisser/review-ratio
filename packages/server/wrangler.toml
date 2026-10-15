@@ -5,5 +5,7 @@ main = "src/worker.ts"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
+# Off on purpose: platform logs record request metadata such as client addresses, which the
+# privacy model keeps out of storage. Turn on only with a retention policy that matches it.
 [observability]
-enabled = true
+enabled = false

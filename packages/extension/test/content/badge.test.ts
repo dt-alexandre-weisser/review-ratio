@@ -23,9 +23,11 @@ describe('badge DOM', () => {
     expect(findSlot(document)?.className).toBe('AppHeader-globalBar-end');
   });
 
-  it('falls back to any header, and to nothing', () => {
-    document.body.innerHTML = '<header id="h"></header>';
-    expect(findSlot(document)?.id).toBe('h');
+  it('uses GitHub header containers only, never an unrelated header', () => {
+    document.body.innerHTML = '<div class="AppHeader-actions" id="a"></div>';
+    expect(findSlot(document)?.id).toBe('a');
+    document.body.innerHTML = '<article><header id="h"></header></article>';
+    expect(findSlot(document)).toBeNull();
     document.body.innerHTML = '<main></main>';
     expect(findSlot(document)).toBeNull();
     expect(mount(document, view)).toBeNull();
@@ -41,7 +43,9 @@ describe('badge DOM', () => {
     expect(el.title).toBe(view.tooltip);
     expect(el.dataset['tone']).toBe('good');
     expect(el.dataset['stale']).toBe('false');
-    expect(el.getAttribute('role')).toBe('status');
+    // Not a live region: screen readers are not interrupted by refreshes.
+    expect(el.getAttribute('role')).toBeNull();
+    expect(el.getAttribute('aria-live')).toBeNull();
 
     const again = mount(document, {
       ...view,
@@ -56,8 +60,29 @@ describe('badge DOM', () => {
   });
 
   it('renders text, never HTML', () => {
-    document.body.innerHTML = '<header></header>';
+    document.body.innerHTML = '<div class="AppHeader-globalBar-end"></div>';
     const el = mount(document, { ...view, text: '<img src=x onerror=alert(1)>' })!;
     expect(el.querySelector('img')).toBeNull();
+  });
+});
+
+describe('render', () => {
+  it('leaves the DOM untouched when the view did not change', () => {
+    document.body.innerHTML = '<div class="AppHeader-globalBar-end"></div>';
+    const el = mount(document, view)!;
+    const full = el.querySelector('.review-ratio-full')!;
+    let mutations = 0;
+    const observer = new MutationObserver((records) => (mutations += records.length));
+    observer.observe(el, { subtree: true, childList: true, characterData: true, attributes: true });
+    mount(document, { ...view });
+    mount(document, { ...view });
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        observer.disconnect();
+        expect(mutations).toBe(0);
+        expect(el.querySelector('.review-ratio-full')).toBe(full);
+        resolve();
+      }, 0);
+    });
   });
 });

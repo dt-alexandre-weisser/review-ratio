@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import { PUBLISHED_CLASSES } from '../src/classes.ts';
 import { DECODERS, versionStatus } from '../src/decoders/index.ts';
-import { CLASS_WEIGHTS, score } from '../src/formula.ts';
+import { CLASS_WEIGHTS, score, scoreDown, scoreUp } from '../src/formula.ts';
 import { ANCHOR_BUILDERS } from './anchors.ts';
 
 const supported = [...DECODERS.keys()];
@@ -58,6 +58,10 @@ describe.each(supported)('major %i', (major) => {
       const result = score(decoded.payload, now);
       expect(result.ratio, `lines=${lines}`).toBe(1);
       expect(result.up).toBe(result.down);
+      // Exact, before rounding: a weight of 1.001 must not hide behind the rounding.
+      const [up] = decoded.payload.up;
+      const [down] = decoded.payload.down;
+      expect(scoreUp(up!, now)).toBe(scoreDown(down!, now));
     }
   });
 });
