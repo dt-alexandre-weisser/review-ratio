@@ -1,0 +1,27 @@
+{
+  "name": "@review-ratio/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Stateless Hono server: scores an anonymous review-ratio payload with the opaque formula.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/node.ts",
+    "start": "node dist/node.js",
+    "build": "pnpm build:node && pnpm build:worker",
+    "typecheck": "tsc -p tsconfig.json",
+    "build:node": "esbuild src/node.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/node.js --sourcemap --log-level=warning",
+    "build:worker": "esbuild src/worker.ts --bundle --platform=neutral --main-fields=module,main --conditions=worker,browser --target=es2022 --format=esm --outfile=dist/worker.js --log-level=warning"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.0",
+    "@review-ratio/contract": "workspace:*",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

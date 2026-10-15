@@ -1,0 +1,9 @@
+# Cloudflare Workers deployment of the same Hono app (later phase).
+#   pnpm --filter @review-ratio/server exec wrangler deploy
+name = "review-ratio"
+main = "src/worker.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[observability]
+enabled = true

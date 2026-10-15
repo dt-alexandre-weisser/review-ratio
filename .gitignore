@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.wrangler/
+.env
+.env.*
+!.env.example
+*.zip
+.DS_Store
+.eslintcache
+test-results/
+playwright-report/

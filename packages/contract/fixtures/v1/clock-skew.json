@@ -1,0 +1,24 @@
+{
+  "description": "Hour rounding can put a timestamp slightly in the future of the server clock. The record counts at full weight.",
+  "now": "2026-10-15T12:10:00Z",
+  "payload": {
+    "contractVersion": 1,
+    "up": [
+      {
+        "t": "2026-10-15T13:00:00Z",
+        "action": "approve",
+        "linesByClass": { "production": 400 },
+        "commentedLinesByClass": {},
+        "viewedLinesByClass": {},
+        "waitedHoursWithoutReview": 0
+      }
+    ],
+    "down": [
+      {
+        "prKey": "aa11bb22-cc33-4d44-8e55-ff6677889900",
+        "readyAt": "2026-10-15T13:00:00Z",
+        "linesByClass": { "production": 400 }
+      }
+    ]
+  }
+}

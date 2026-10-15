@@ -1,0 +1,105 @@
+import { describe, expect, it } from 'vitest';
+
+import { badgeView, formatRatio, formatRp, toneOf } from '../src/lib/badge-state.ts';
+import { EMPTY_CACHE, type BadgeCache } from '../src/lib/storage.ts';
+
+function cache(patch: Partial<BadgeCache>): BadgeCache {
+  return { ...EMPTY_CACHE, status: 'ok', scoredAt: Date.parse('2026-10-15T12:00:00Z'), ...patch };
+}
+
+describe('formatting', () => {
+  it('formats RP with thousands separators', () => {
+    expect(formatRp(64129)).toBe('64,129 RP');
+    expect(formatRp(0)).toBe('0 RP');
+    expect(formatRp(12.6)).toBe('13 RP');
+  });
+
+  it('formats the ratio with two decimals', () => {
+    expect(formatRatio(1.49)).toBe('1.49');
+    expect(formatRatio(1)).toBe('1.00');
+    expect(formatRatio(0.456)).toBe('0.46');
+    expect(formatRatio(1234.5)).toBe('1,234.50');
+  });
+});
+
+describe('toneOf', () => {
+  it.each([
+    [1.0, 'good'],
+    [3.2, 'good'],
+    [0.99, 'neutral'],
+    [0.5, 'neutral'],
+    [0.49, 'low'],
+    [0, 'low'],
+  ] as const)('ratio %d → %s', (ratio, tone) => {
+    expect(toneOf(ratio, 10)).toBe(tone);
+  });
+
+  it('treats a null ratio as ∞ when something was given', () => {
+    expect(toneOf(null, 1)).toBe('good');
+    expect(toneOf(null, 0)).toBe('neutral');
+  });
+});
+
+describe('badgeView', () => {
+  it('shows the design example', () => {
+    const view = badgeView(cache({ score: { up: 64129, down: 43002, ratio: 1.49 } }));
+    expect(view.text).toBe('↑ 64,129 RP · ↓ 43,002 RP | Ratio 1.49');
+    expect(view.short).toBe('Ratio 1.49');
+    expect(view.tone).toBe('good');
+    expect(view.stale).toBe(false);
+    expect(view.tooltip).toContain('given / asked');
+  });
+
+  it('is amber below 0.5, never red', () => {
+    const view = badgeView(cache({ score: { up: 10, down: 100, ratio: 0.1 } }));
+    expect(view.tone).toBe('low');
+  });
+
+  it('shows ∞ in green when nothing was asked', () => {
+    const view = badgeView(cache({ score: { up: 120, down: 0, ratio: null } }));
+    expect(view.text).toBe('↑ 120 RP · ↓ 0 RP | Ratio ∞');
+    expect(view.tone).toBe('good');
+  });
+
+  it('shows — in grey when both sides are 0, and stays visible', () => {
+    const view = badgeView(cache({ score: { up: 0, down: 0, ratio: null } }));
+    expect(view.text).toContain('Ratio —');
+    expect(view.tone).toBe('neutral');
+  });
+
+  it('greys the last ratio with "stale since HH:MM" when the server is unreachable', () => {
+    const scoredAt = new Date(2026, 9, 15, 9, 5).getTime();
+    const view = badgeView(
+      cache({ status: 'stale', scoredAt, score: { up: 10, down: 5, ratio: 2 } }),
+    );
+    expect(view.text).toContain('Ratio 2.00');
+    expect(view.stale).toBe(true);
+    expect(view.tone).toBe('neutral');
+    expect(view.tooltip).toBe('stale since 09:05');
+  });
+
+  it('shows placeholders when stale without any score', () => {
+    const view = badgeView(cache({ status: 'stale', score: null, error: 'server unreachable' }));
+    expect(view.text).toContain('Ratio —');
+    expect(view.stale).toBe(true);
+    expect(view.tooltip).toContain('server unreachable');
+  });
+
+  it('shows "update the extension" in grey on 426', () => {
+    const view = badgeView(
+      cache({ status: 'upgrade_required', score: { up: 1, down: 1, ratio: 1 } }),
+    );
+    expect(view.text).toBe('update the extension');
+    expect(view.tone).toBe('neutral');
+  });
+
+  it('asks for set up without a token and flags a rejected token', () => {
+    expect(badgeView(cache({ status: 'no_token' })).text).toContain('set up');
+    expect(badgeView(cache({ status: 'bad_token' })).text).toContain('token rejected');
+  });
+
+  it('shows the no-activity state on a fresh ok cache without a score', () => {
+    const view = badgeView(cache({ status: 'ok', score: null }));
+    expect(view.tooltip).toContain('no activity');
+  });
+});

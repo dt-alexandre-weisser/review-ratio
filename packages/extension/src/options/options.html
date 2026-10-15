@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>review-ratio options</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>review-ratio</h1>
+      <p class="lead">
+        A private badge in the GitHub header: how much you review compared to how much you ask to be
+        reviewed. Nobody else sees your ratio.
+      </p>
+
+      <form id="settings">
+        <section>
+          <h2>GitHub token</h2>
+          <p>
+            Create a
+            <a
+              href="https://github.com/settings/personal-access-tokens/new"
+              target="_blank"
+              rel="noreferrer"
+              >fine-grained personal access token</a
+            >
+            with resource owner <strong id="org-hint">DiliTrust</strong>, access to all
+            repositories, and these <em>read-only</em> permissions: Pull requests, Contents,
+            Metadata. The token stays in this browser and is only sent to api.github.com.
+          </p>
+          <label for="token">Token</label>
+          <div class="row">
+            <input
+              id="token"
+              name="token"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="github_pat_…"
+            />
+            <button type="button" id="toggle-token" aria-pressed="false">Show</button>
+          </div>
+        </section>
+
+        <section>
+          <h2>Scope</h2>
+          <label for="org">GitHub organisation</label>
+          <input id="org" name="org" type="text" autocomplete="off" spellcheck="false" />
+          <label for="excluded">Excluded repositories</label>
+          <textarea
+            id="excluded"
+            name="excluded"
+            rows="4"
+            spellcheck="false"
+            placeholder="one per line: owner/name or name&#10;# lines starting with # are ignored"
+          ></textarea>
+        </section>
+
+        <section>
+          <h2>Server</h2>
+          <label for="server-url">Server URL</label>
+          <input
+            id="server-url"
+            name="serverUrl"
+            type="url"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="http://127.0.0.1:8787"
+          />
+          <p class="hint">
+            The server receives numbers only: no login, no repository, no PR number, no file name.
+            Open DevTools on the service worker to see the exact payload.
+          </p>
+        </section>
+
+        <div class="actions">
+          <button type="submit" id="save" class="primary">Save</button>
+          <button type="button" id="test">Test connection</button>
+          <button type="button" id="refresh">Refresh badge now</button>
+          <button type="button" id="forget" class="danger">Forget local activity data</button>
+        </div>
+        <p id="status" role="status" aria-live="polite"></p>
+      </form>
+
+      <section>
+        <h2>Badge</h2>
+        <dl id="diagnostics">
+          <dt>State</dt>
+          <dd id="diag-status">—</dd>
+          <dt>Last score</dt>
+          <dd id="diag-score">—</dd>
+          <dt>Last refresh</dt>
+          <dd id="diag-refreshed">—</dd>
+          <dt>Last error</dt>
+          <dd id="diag-error">—</dd>
+        </dl>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

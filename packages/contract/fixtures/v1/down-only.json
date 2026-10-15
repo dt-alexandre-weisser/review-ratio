@@ -1,0 +1,15 @@
+{
+  "description": "PRs asked, no review given. Ratio 0.",
+  "now": "2026-10-15T12:00:00Z",
+  "payload": {
+    "contractVersion": 1,
+    "up": [],
+    "down": [
+      {
+        "prKey": "d4c3b2a1-f6e5-4a7b-8c9d-0e1f2a3b4c5d",
+        "readyAt": "2026-10-14T12:00:00Z",
+        "linesByClass": { "production": 80, "ci": 30 }
+      }
+    ]
+  }
+}

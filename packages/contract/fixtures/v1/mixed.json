@@ -1,0 +1,67 @@
+{
+  "description": "A realistic week: several review actions with comments, Viewed files and a rescue; own PRs of every size, one closed early, one older than the window.",
+  "now": "2026-10-15T12:00:00Z",
+  "payload": {
+    "contractVersion": 1,
+    "up": [
+      {
+        "t": "2026-10-15T11:00:00Z",
+        "action": "approve",
+        "linesByClass": { "production": 1200, "test": 300, "generated": 2000 },
+        "commentedLinesByClass": { "production": 30 },
+        "viewedLinesByClass": { "production": 400, "test": 100 },
+        "waitedHoursWithoutReview": 0
+      },
+      {
+        "t": "2026-10-12T12:00:00Z",
+        "action": "request_changes",
+        "linesByClass": { "test": 200, "docs": 50 },
+        "commentedLinesByClass": { "test": 20 },
+        "viewedLinesByClass": {},
+        "waitedHoursWithoutReview": 12
+      },
+      {
+        "t": "2026-10-10T12:00:00Z",
+        "action": "comment",
+        "linesByClass": { "production": 100, "config": 20 },
+        "commentedLinesByClass": { "production": 10 },
+        "viewedLinesByClass": { "production": 100 },
+        "waitedHoursWithoutReview": 60
+      },
+      {
+        "t": "2026-10-09T12:00:00Z",
+        "action": "thread_reply",
+        "linesByClass": {},
+        "commentedLinesByClass": { "production": 20 },
+        "viewedLinesByClass": {},
+        "waitedHoursWithoutReview": 0
+      },
+      {
+        "t": "2026-10-07T11:00:00Z",
+        "action": "approve",
+        "linesByClass": { "production": 5000 },
+        "commentedLinesByClass": {},
+        "viewedLinesByClass": {},
+        "waitedHoursWithoutReview": 0
+      }
+    ],
+    "down": [
+      {
+        "prKey": "6c1a2f3e-7b8d-4e9f-a0b1-c2d3e4f5a6b7",
+        "readyAt": "2026-10-13T12:00:00Z",
+        "linesByClass": { "production": 1200 }
+      },
+      {
+        "prKey": "9e8d7c6b-5a4f-4e3d-9c2b-1a0f9e8d7c6b",
+        "readyAt": "2026-10-09T12:00:00Z",
+        "closedAt": "2026-10-10T12:00:00Z",
+        "linesByClass": { "production": 100, "docs": 40 }
+      },
+      {
+        "prKey": "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9",
+        "readyAt": "2026-10-05T12:00:00Z",
+        "linesByClass": { "production": 900 }
+      }
+    ]
+  }
+}
