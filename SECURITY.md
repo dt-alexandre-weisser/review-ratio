@@ -29,8 +29,8 @@ does without DevTools.
 - Kept in `chrome.storage.session`: in memory only, gone when the browser closes, and out of reach
   of content scripts.
 - Holds the time, method, URL, status and duration of each call, the GraphQL operation and PR it
-  read, and refresh start and end lines. URLs name repositories, PRs and your login, so the page
-  warns before you copy the log.
+  read, and refresh start and end lines. URLs name repositories, PRs and your login. The page says
+  so, and repeats it after **Copy as text**.
 - Never holds a header or a body, so never the token or the payload.
 - Cleared by **Forget local activity data**. Nothing in it leaves the browser.
 

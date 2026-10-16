@@ -4,7 +4,7 @@ import {
   ActivityLog,
   FLUSH_DELAY_MS,
   LOG_WINDOW_MS,
-  MAX_BATCHES,
+  MAX_ENTRIES,
   MAX_BATCH_ENTRIES,
   cleanUrl,
   clearActivity,
@@ -65,8 +65,8 @@ describe('ActivityLog', () => {
     log.call(call());
     expect(logKeys(area.data)).toEqual([]);
     await vi.advanceTimersByTimeAsync(FLUSH_DELAY_MS);
-    expect(logKeys(area.data)).toEqual([`activity:${NOW}:id1`]);
-    expect(area.data[`activity:${NOW}:id1`]).toHaveLength(2);
+    expect(logKeys(area.data)).toEqual([`activity:${NOW}:2:id1`]);
+    expect(area.data[`activity:${NOW}:2:id1`]).toHaveLength(2);
   });
 
   it('writes a full batch at once', async () => {
@@ -107,21 +107,35 @@ describe('ActivityLog', () => {
     expect(entries.map((e) => (e.kind === 'event' ? e.message : ''))).toEqual(['b', 'a']);
   });
 
-  it('forgets batches older than 30 minutes, from the future, and beyond the cap', async () => {
+  it('forgets batches older than 30 minutes, from the future, and of an older layout', async () => {
     const { area, log, advance, now } = setup({ settings: { token: 'kept' } });
     log.event('old');
     await log.flush();
     advance(LOG_WINDOW_MS + 1);
-    area.data[`activity:${now() + LOG_WINDOW_MS + 1}:future`] = [];
+    area.data[`activity:${now() + LOG_WINDOW_MS + 1}:1:future`] = [];
+    area.data[`activity:${now()}:older-layout`] = [];
     log.event('new');
     await log.flush();
-    expect(logKeys(area.data)).toEqual([`activity:${now()}:id2`]);
+    expect(logKeys(area.data)).toEqual([`activity:${now()}:1:id2`]);
     expect(area.data['settings']).toEqual({ token: 'kept' });
+  });
 
-    for (let i = 0; i < MAX_BATCHES + 5; i++) area.data[`activity:${now() - i - 1}:x${i}`] = [];
+  it('keeps the newest batches within the entry cap, and always the newest one', async () => {
+    const { area, log, now } = setup();
+    for (let i = 1; i <= 60; i++) area.data[`activity:${now() - i}:100:x${i}`] = [];
+    log.event('newest');
     await log.flush();
-    expect(logKeys(area.data)).toHaveLength(MAX_BATCHES);
-    expect(area.data[`activity:${now()}:id2`]).toBeDefined();
+    const kept = logKeys(area.data);
+    // The newest batch (1 entry) and the 49 newest of 100 entries: 4,901 entries.
+    expect(kept).toHaveLength(50);
+    expect(kept).toContain(`activity:${now()}:1:id1`);
+    expect(kept).toContain(`activity:${now() - 49}:100:x49`);
+    expect(kept).not.toContain(`activity:${now() - 50}:100:x50`);
+    expect(MAX_ENTRIES).toBe(5_000);
+
+    area.data[`activity:${now() + 1}:${MAX_ENTRIES + 1}:huge`] = [];
+    await log.flush();
+    expect(logKeys(area.data)).toEqual([`activity:${now() + 1}:${MAX_ENTRIES + 1}:huge`]);
   });
 
   it('shows only entries of the last 30 minutes and skips malformed ones', async () => {
@@ -129,37 +143,46 @@ describe('ActivityLog', () => {
     log.event('29 minutes ago');
     await log.flush();
     advance(29 * MINUTE);
-    area.data[`activity:${now()}:bad`] = [
+    area.data[`activity:${now()}:5:bad`] = [
       { kind: 'event', at: now() - LOG_WINDOW_MS - 1, message: 'too old, in a recent batch' },
       { kind: 'event', at: 'yesterday', message: 'bad time' },
       { kind: 'call', at: now(), method: 'GET' },
       { kind: 'other', at: now() },
       null,
     ];
-    area.data[`activity:${now()}:notalist`] = { kind: 'event', at: now(), message: 'x' };
-    area.data['activity:garbage'] = [{ kind: 'event', at: now(), message: 'not a log key' }];
+    area.data[`activity:${now()}:1:notalist`] = { kind: 'event', at: now(), message: 'x' };
+    area.data[`activity:${now()}:garbage`] = [{ kind: 'event', at: now(), message: 'old layout' }];
     const entries = await readActivity(area, now());
     expect(entries).toEqual([{ kind: 'event', at: NOW, message: '29 minutes ago' }]);
     advance(2 * MINUTE);
     expect(await readActivity(area, now())).toEqual([]);
   });
 
-  it('clears its own keys only', async () => {
+  it('clears its own keys only, of any layout', async () => {
     const { area, log } = setup({ settings: { token: 'kept' } });
     log.event('x');
     await log.flush();
+    area.data['activity:older-layout'] = [];
     await clearActivity(area);
     expect(Object.keys(area.data)).toEqual(['settings']);
     await clearActivity(area);
     expect(Object.keys(area.data)).toEqual(['settings']);
   });
 
-  it('never throws when storage fails', async () => {
-    const { area, log, errors } = setup();
+  it('never throws when storage fails, and still prunes after a failed write', async () => {
+    const { area, log, errors, advance, now } = setup();
+    log.event('old');
+    await log.flush();
+    advance(LOG_WINDOW_MS + 1);
     area.set = () => Promise.reject(new Error('quota exceeded'));
     log.event('x');
     await expect(log.flush()).resolves.toBeUndefined();
     expect(errors).toEqual([new Error('quota exceeded')]);
+    expect(logKeys(area.data)).toEqual([]);
+    area.getKeys = () => Promise.reject(new Error('storage gone'));
+    await expect(log.flush()).resolves.toBeUndefined();
+    expect(errors).toEqual([new Error('quota exceeded'), new Error('storage gone')]);
+    expect(now()).toBeGreaterThan(NOW);
     // Without onError, the failure is swallowed.
     const silent = new ActivityLog(area);
     silent.event('y');
@@ -179,7 +202,7 @@ describe('ActivityLog', () => {
     await log.flush();
     for (const entry of await readActivity(area, now())) {
       for (const value of Object.values(entry)) {
-        if (typeof value === 'string') expect(value.length).toBeLessThanOrEqual(1001);
+        if (typeof value === 'string') expect(value.length).toBeLessThanOrEqual(501);
       }
     }
   });

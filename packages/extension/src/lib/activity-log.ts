@@ -17,11 +17,15 @@ export const LOG_WINDOW_MS = 30 * 60 * 1000;
 export const FLUSH_DELAY_MS = 2_000;
 /** A batch this large is written at once. */
 export const MAX_BATCH_ENTRIES = 100;
-/** Oldest batches beyond this are dropped: at most 30,000 entries, a few MB of the 10 MB quota. */
-export const MAX_BATCHES = 300;
-const MAX_TEXT = 1_000;
+/**
+ * Oldest batches beyond this many entries are dropped. A heavy 30 minutes is about 2,000 calls.
+ * With texts clipped at 500 characters, 5,000 entries stay under 8 MB of the 10 MB quota.
+ */
+export const MAX_ENTRIES = 5_000;
+const MAX_TEXT = 500;
 const KEY_PREFIX = 'activity:';
-const KEY = /^activity:(\d+):[\w-]+$/;
+/** `activity:<flushed at, ms>:<entries>:<id>`: pruning needs no read of the batches. */
+const KEY = /^activity:(\d+):(\d+):[\w-]+$/;
 
 export interface CallEntry {
   kind: 'call';
@@ -67,10 +71,17 @@ function clip(text: string): string {
   return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text;
 }
 
-/** When the batch under `key` was written, or `null` for a key that is not the log's. */
-function flushedAt(key: string): number | null {
+interface BatchKey {
+  key: string;
+  /** When the batch was written. */
+  at: number;
+  entries: number;
+}
+
+/** The parts of a batch key, or `null` for a key that is not a batch of this version. */
+function parseKey(key: string): BatchKey | null {
   const match = KEY.exec(key);
-  return match ? Number(match[1]) : null;
+  return match ? { key, at: Number(match[1]), entries: Number(match[2]) } : null;
 }
 
 /** Buffers entries and writes them to session storage in batches. */
@@ -121,10 +132,18 @@ export class ActivityLog {
     this.timer = null;
     const batch = this.pending;
     this.pending = [];
+    const now = this.now();
+    if (batch.length > 0) {
+      try {
+        await this.area.set({
+          [`${KEY_PREFIX}${now}:${batch.length}:${this.randomId()}`]: batch,
+        });
+      } catch (error) {
+        this.onError(error);
+      }
+    }
+    // Even after a failed write: pruning is what frees room for the next one.
     try {
-      const now = this.now();
-      if (batch.length > 0)
-        await this.area.set({ [`${KEY_PREFIX}${now}:${this.randomId()}`]: batch });
       await prune(this.area, now);
     } catch (error) {
       this.onError(error);
@@ -133,19 +152,28 @@ export class ActivityLog {
 }
 
 /**
- * Removes the batches written outside the window, and the oldest ones beyond `MAX_BATCHES`. A
- * batch written after the window's start holds entries that may still be in it.
+ * Removes the batches written outside the window, the oldest ones beyond `MAX_ENTRIES`, and keys
+ * of an older layout. A batch written after the window's start holds entries that may still be
+ * in it.
  */
 async function prune(area: LogArea, now: number): Promise<void> {
-  const batches = (await area.getKeys())
-    .map((key) => ({ key, at: flushedAt(key) }))
-    .filter((b): b is { key: string; at: number } => b.at !== null)
+  const keys = (await area.getKeys()).filter((key) => key.startsWith(KEY_PREFIX));
+  const stale = keys.filter((key) => parseKey(key) === null);
+  const batches = keys
+    .map(parseKey)
+    .filter((b): b is BatchKey => b !== null)
     .sort((a, b) => b.at - a.at);
-  // A clock set back leaves batches "from the future": they would never age out.
-  const stale = batches.filter(
-    (b, i) => i >= MAX_BATCHES || b.at < now - LOG_WINDOW_MS || b.at > now + LOG_WINDOW_MS,
-  );
-  if (stale.length > 0) await area.remove(stale.map((b) => b.key));
+  let kept = 0;
+  for (const batch of batches) {
+    // A clock set back leaves batches "from the future": they would never age out.
+    const outside = batch.at < now - LOG_WINDOW_MS || batch.at > now + LOG_WINDOW_MS;
+    if (outside || (kept > 0 && kept + batch.entries > MAX_ENTRIES)) {
+      stale.push(batch.key);
+    } else {
+      kept += batch.entries;
+    }
+  }
+  if (stale.length > 0) await area.remove(stale);
 }
 
 function isEntry(value: unknown): value is ActivityEntry {
@@ -167,8 +195,8 @@ function isEntry(value: unknown): value is ActivityEntry {
 /** The entries of the last 30 minutes, newest first. Malformed entries are skipped. */
 export async function readActivity(area: LogArea, now: number): Promise<ActivityEntry[]> {
   const keys = (await area.getKeys()).filter((key) => {
-    const at = flushedAt(key);
-    return at !== null && at >= now - LOG_WINDOW_MS;
+    const batch = parseKey(key);
+    return batch !== null && batch.at >= now - LOG_WINDOW_MS;
   });
   if (keys.length === 0) return [];
   const stored = await area.get(keys);
@@ -181,7 +209,7 @@ export async function readActivity(area: LogArea, now: number): Promise<Activity
 }
 
 export async function clearActivity(area: LogArea): Promise<void> {
-  const keys = (await area.getKeys()).filter((key) => flushedAt(key) !== null);
+  const keys = (await area.getKeys()).filter((key) => key.startsWith(KEY_PREFIX));
   if (keys.length > 0) await area.remove(keys);
 }
 
@@ -243,18 +271,9 @@ export function loggingFetch(
       typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
     );
     const detail = describeBody(init?.body);
+    let response: Response;
     try {
-      const response = await inner(input, init);
-      log.call({
-        at: started,
-        method,
-        url,
-        detail,
-        status: response.status,
-        error: null,
-        ms: now() - started,
-      });
-      return response;
+      response = await inner(input, init);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.call({
@@ -268,6 +287,17 @@ export function loggingFetch(
       });
       throw error;
     }
+    // Outside the try: logging must never turn an answered call into a failed one.
+    log.call({
+      at: started,
+      method,
+      url,
+      detail,
+      status: response.status,
+      error: null,
+      ms: now() - started,
+    });
+    return response;
   };
 }
 
@@ -313,6 +343,11 @@ export function formatDuration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
+/** No answer, or an HTTP error status. A GraphQL error inside a 200 is not seen here. */
+function isFailed(entry: CallEntry): boolean {
+  return entry.status === null || entry.status >= 400;
+}
+
 export function rowOf(entry: ActivityEntry): ActivityRow {
   const time = localTime(entry.at);
   if (entry.kind === 'event') {
@@ -326,14 +361,13 @@ export function rowOf(entry: ActivityEntry): ActivityRow {
       event: true,
     };
   }
-  const failed = entry.status === null || entry.status >= 400;
   return {
     time,
     what: `${entry.method} ${displayUrl(entry.url)}`,
     detail: entry.error ? [entry.detail, entry.error].filter(Boolean).join(' · ') : entry.detail,
     result: entry.status === null ? 'failed' : String(entry.status),
     duration: formatDuration(entry.ms),
-    failed,
+    failed: isFailed(entry),
     event: false,
   };
 }
@@ -351,7 +385,7 @@ export function summarize(entries: readonly ActivityEntry[]): string {
       host = 'unknown host';
     }
     byHost.set(host, (byHost.get(host) ?? 0) + 1);
-    if (rowOf(entry).failed) failures += 1;
+    if (isFailed(entry)) failures += 1;
   }
   const calls = [...byHost.values()].reduce((a, b) => a + b, 0);
   if (calls === 0) return 'No calls in the last 30 minutes.';

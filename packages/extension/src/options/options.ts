@@ -127,6 +127,8 @@ async function testConnection(settings: Settings): Promise<void> {
 }
 
 let shownEntries: ActivityEntry[] = [];
+/** What the table shows, to skip redraws that would clear the user's text selection. */
+let shownSignature = '';
 
 function activityRow(entry: ActivityEntry): HTMLTableRowElement {
   const row = rowOf(entry);
@@ -156,6 +158,10 @@ function activityRow(entry: ActivityEntry): HTMLTableRowElement {
 
 async function showActivity(): Promise<void> {
   const entries = await readActivity(sessionArea, Date.now());
+  // Entries only arrive newest and age out oldest: both ends and the count tell any change.
+  const signature = `${entries.length}:${entries[0]?.at ?? ''}:${entries.at(-1)?.at ?? ''}`;
+  if (signature === shownSignature) return;
+  shownSignature = signature;
   shownEntries = entries;
   activitySummary.textContent = summarize(entries);
   const rows = entries.slice(0, MAX_ROWS).map(activityRow);
@@ -252,7 +258,11 @@ copyButton.addEventListener('click', () => {
   }
   navigator.clipboard.writeText(text).then(
     () => {
-      setStatus('ok', `Copied ${shownEntries.length} activity log entries.`);
+      const n = shownEntries.length;
+      setStatus(
+        'ok',
+        `Copied ${n} activity log ${n === 1 ? 'entry' : 'entries'}. They name repositories and pull requests: read them before sharing.`,
+      );
     },
     (error: unknown) => {
       setStatus('error', `Cannot copy: ${error instanceof Error ? error.message : String(error)}`);

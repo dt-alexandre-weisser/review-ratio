@@ -174,9 +174,16 @@ question below.
   content scripts cannot read that area.
 - Entries are buffered for 2 seconds and written as one batch under its own key. Writers (the
   worker, any open options page) never read-modify-write a shared key, so none can overwrite
-  another. Batches older than 30 minutes, or beyond 300 batches, are dropped on every write;
-  the page also filters entries by time when it reads them.
-- Writing the log never fails a refresh: errors go to the worker console.
+  another. The key carries the batch's write time and size, so every write prunes without reading
+  the batches: those older than 30 minutes go, and the oldest beyond 5,000 entries. Texts are
+  clipped at 500 characters, which keeps the worst case under 8 MB of the 10 MB quota. The page
+  also filters entries by time when it reads them.
+- Writing the log never fails a refresh: errors go to the worker console, and a failed write
+  still prunes, which frees room for the next one.
+- The status is the HTTP status, known when the headers arrive. A GraphQL error inside a 200, or
+  a body that times out after its headers, shows only in the refresh's own failure line.
+- Without a token, the skipped refresh is logged once, when the token goes away, not on every
+  page load.
 
 ### Badge states
 

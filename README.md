@@ -81,8 +81,8 @@ options page has **Refresh badge now** and shows the last score and error.
 ### Where the badge is
 
 In the top bar of github.com, on the right, first in the group of search box and icons. It needs
-GitHub's signed-in header: signed-out pages have none. Below 1,280 px of window width it shortens
-to `Ratio 1.49`, and below 768 px it hides, as GitHub's header has no room left.
+GitHub's signed-in header: signed-out pages have none. At a window width of 1,280 px or less it
+shortens to `Ratio 1.49`, and below 768 px it hides, as GitHub's header has no room left.
 
 ### Activity log
 

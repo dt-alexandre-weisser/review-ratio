@@ -63,7 +63,10 @@ export async function refresh(deps: RefreshDeps, reason?: string): Promise<Badge
   await store.migrate();
   const settings = await store.getSettings();
   if (!settings.token) {
-    deps.log?.('refresh skipped: no GitHub token yet');
+    // Once, not on every page load: without a token no refresh is ever recorded as attempted.
+    if ((await store.getBadge()).status !== 'no_token') {
+      deps.log?.('refresh skipped: no GitHub token');
+    }
     return store.updateBadge({
       status: 'no_token',
       error: null,

@@ -129,13 +129,16 @@ describe('refresh', () => {
   it('does nothing but flag the badge without a token', async () => {
     const { deps, srv, store } = await setup({ token: '' });
     const log = vi.fn();
-    await store.updateBadge({ unfinishedRefreshes: 1 });
+    await store.migrate();
+    await store.updateBadge({ status: 'ok', unfinishedRefreshes: 1 });
     expect(await refresh({ ...deps, log })).toMatchObject({
       status: 'no_token',
       unfinishedRefreshes: 0,
     });
     expect(srv.scored).toHaveLength(0);
-    expect(log.mock.calls).toEqual([['refresh skipped: no GitHub token yet']]);
+    // Logged when the token goes away, not again on every page load.
+    await refresh({ ...deps, log });
+    expect(log.mock.calls).toEqual([['refresh skipped: no GitHub token']]);
   });
 
   it('logs why a refresh started and how it ended', async () => {
