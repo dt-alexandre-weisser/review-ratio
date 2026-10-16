@@ -5,9 +5,7 @@ import {
   coerceSettings,
   isExcludedRepo,
   isValidOrg,
-  normalizeServerUrl,
   parseExcludeList,
-  serverUrlProblem,
 } from '../src/lib/settings.ts';
 
 describe('parseExcludeList', () => {
@@ -29,23 +27,14 @@ describe('isExcludedRepo', () => {
   });
 });
 
-describe('normalizeServerUrl', () => {
-  it('trims trailing slashes and falls back to the default', () => {
-    expect(normalizeServerUrl(' https://rr.example.com/// ')).toBe('https://rr.example.com');
-    expect(normalizeServerUrl('')).toBe(DEFAULT_SETTINGS.serverUrl);
-  });
-});
-
 describe('coerceSettings', () => {
   it('returns the defaults for garbage', () => {
     expect(coerceSettings(undefined)).toEqual(DEFAULT_SETTINGS);
     expect(coerceSettings('x')).toEqual(DEFAULT_SETTINGS);
-    expect(coerceSettings({ token: 3, org: '  ', excludedRepos: 'a', serverUrl: null })).toEqual(
-      DEFAULT_SETTINGS,
-    );
+    expect(coerceSettings({ token: 3, org: '  ', excludedRepos: 'a' })).toEqual(DEFAULT_SETTINGS);
   });
 
-  it('keeps valid values', () => {
+  it('keeps valid values and drops the server URL older versions stored', () => {
     expect(
       coerceSettings({
         token: ' t ',
@@ -53,7 +42,7 @@ describe('coerceSettings', () => {
         excludedRepos: ['A', 1],
         serverUrl: 'https://x/',
       }),
-    ).toEqual({ token: 't', org: 'Acme', excludedRepos: ['a'], serverUrl: 'https://x' });
+    ).toEqual({ token: 't', org: 'Acme', excludedRepos: ['a'] });
   });
 });
 
@@ -67,18 +56,5 @@ describe('isValidOrg', () => {
     expect(isValidOrg('a b')).toBe(false);
     expect(isValidOrg('org:x')).toBe(false);
     expect(isValidOrg('a'.repeat(40))).toBe(false);
-  });
-});
-
-describe('serverUrlProblem', () => {
-  it('allows https anywhere and http on loopback only', () => {
-    expect(serverUrlProblem('https://rr.example.com')).toBeNull();
-    expect(serverUrlProblem('http://127.0.0.1:8787')).toBeNull();
-    expect(serverUrlProblem('http://localhost:8787')).toBeNull();
-    expect(serverUrlProblem('http://rr.example.com')).toMatch(/https/);
-    expect(serverUrlProblem('ftp://x')).toMatch(/https/);
-    expect(serverUrlProblem('not a url')).toMatch(/valid/);
-    expect(serverUrlProblem('https://u:p@rr.example.com')).toMatch(/credentials/);
-    expect(serverUrlProblem('https://rr.example.com/?a=1')).toMatch(/query/);
   });
 });

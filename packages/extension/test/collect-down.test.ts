@@ -61,17 +61,18 @@ describe('downRecordForPullRequest', () => {
     expect(downRecordForPullRequest(pr({ ...mine, readyForReviewAt: hoursAgo(5) }), ctx)).toEqual({
       prKey: 'key:DiliTrust/app#1',
       readyAtMs: NOW - 5 * 3_600_000,
-      closedAtMs: null,
       linesByClass: { production: 400 },
     });
   });
 
   it('keeps counting a merged or closed PR in full', () => {
-    const record = downRecordForPullRequest(
+    const open = downRecordForPullRequest(pr(mine), ctx);
+    const merged = downRecordForPullRequest(
       pr({ ...mine, state: 'MERGED', closedAt: hoursAgo(2) }),
       ctx,
     );
-    expect(record?.closedAtMs).toBe(NOW - 2 * 3_600_000);
+    expect(merged).not.toBeNull();
+    expect(merged).toEqual(open);
   });
 
   it('ignores drafts, PRs older than 7 days of review, and PRs of others', () => {

@@ -1,0 +1,13 @@
+{
+  "description": "PRs asked, no review given. Ratio 0.",
+  "now": "2026-10-15T12:00:00Z",
+  "records": {
+    "up": [],
+    "down": [
+      {
+        "readyAt": "2026-10-14T12:00:00Z",
+        "linesByClass": { "production": 80, "ci": 30 }
+      }
+    ]
+  }
+}

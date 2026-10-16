@@ -10,7 +10,6 @@
     "pnpm": ">=10"
   },
   "scripts": {
-    "dev:server": "pnpm --filter @review-ratio/server dev",
     "build": "pnpm -r --if-present build",
     "typecheck": "tsc -p tsconfig.json && pnpm -r --if-present typecheck",
     "lint": "eslint . --max-warnings 0",

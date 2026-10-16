@@ -3,7 +3,7 @@
  * words a developer can act on. A token that works but cannot see the organisation's private
  * repositories is the classic silent failure: the badge would read "no activity".
  */
-import { serverUrlProblem, type Settings } from './settings.ts';
+import type { Settings } from './settings.ts';
 import { WINDOW_MS, isoDate } from './time.ts';
 
 export interface Diagnosis {
@@ -76,33 +76,6 @@ export async function diagnose(
       }
     } catch (error) {
       problem(`GitHub: unreachable (${error instanceof Error ? error.message : String(error)}).`);
-    }
-  }
-
-  const urlProblem = serverUrlProblem(settings.serverUrl);
-  if (urlProblem) {
-    problem(`Server: ${urlProblem}.`);
-  } else {
-    try {
-      const res = await fetchImpl(`${settings.serverUrl}/health`, {
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      });
-      const body = (await res.json()) as {
-        ok?: boolean;
-        version?: string;
-        contract?: { supported?: number[] };
-      };
-      if (res.ok && body.ok) {
-        lines.push(
-          `Server: ${settings.serverUrl} is up (v${body.version ?? '?'}, contract ${body.contract?.supported?.join(', ') ?? '?'}).`,
-        );
-      } else {
-        problem(`Server: unexpected answer ${res.status} from ${settings.serverUrl}.`);
-      }
-    } catch (error) {
-      problem(
-        `Server: unreachable at ${settings.serverUrl} (${error instanceof Error ? error.message : String(error)}).`,
-      );
     }
   }
 

@@ -1,14 +1,14 @@
 /**
- * One refresh: settings → class globs → GitHub window → payload → server score → cache.
+ * One refresh: settings → GitHub window → records → local score → cache.
  * Pure orchestration over injected dependencies so it can be tested without Chrome.
  */
 import { createClassifier } from './classify.ts';
 import { collectWindow } from './collect/index.ts';
 import { GitHubAuthError, GitHubError, GitHubRateLimitError } from './github/client.ts';
 import type { GitHubClient } from './github/types.ts';
-import { buildPayload } from './payload.ts';
-import { UpgradeRequiredError, type ServerClient } from './server-client.ts';
-import { serverUrlProblem } from './settings.ts';
+import { CLASS_GLOBS } from './scoring/classes.ts';
+import { score } from './scoring/formula.ts';
+import { buildRecords } from './scoring/records.ts';
 import type { BadgeCache, Store } from './storage.ts';
 import { REFRESH_INTERVAL_MS, REFRESH_LOCK_MS } from './time.ts';
 
@@ -16,7 +16,6 @@ export interface RefreshDeps {
   store: Store;
   now: () => number;
   github: (token: string) => GitHubClient;
-  server: (baseUrl: string) => ServerClient;
   randomUUID: () => string;
   log?: (message: string) => void;
 }
@@ -86,16 +85,10 @@ export async function refresh(deps: RefreshDeps, reason?: string): Promise<Badge
   });
 
   try {
-    const urlProblem = serverUrlProblem(settings.serverUrl);
-    if (urlProblem) throw new Error(urlProblem);
-    const server = deps.server(settings.serverUrl);
-    // First, and every time: proves the server is up before spending GitHub calls, and keeps
-    // the globs current.
-    const classes = await server.fetchClasses();
     const collected = await collectWindow({
       github: deps.github(settings.token),
       settings,
-      classify: createClassifier(classes),
+      classify: createClassifier(CLASS_GLOBS),
       nowMs: startedAt,
       prKeys: await store.getPrKeys(),
       viewedSnapshots: await store.getViewedSnapshots(),
@@ -106,15 +99,15 @@ export async function refresh(deps: RefreshDeps, reason?: string): Promise<Badge
     await store.setViewedSnapshots(collected.viewedSnapshots);
     await store.setCompareCache(collected.compareCache);
 
-    const payload = buildPayload(collected.up, collected.down);
-    const score = await server.score(payload);
+    const records = buildRecords(collected.up, collected.down);
+    const result = score(records, deps.now());
     deps.log?.(
-      `refreshed: ${plural(payload.up.length, 'review')}, ${plural(payload.down.length, 'own PR')}, ` +
-        `${collected.skipped} of ${plural(collected.total, 'PR')} skipped → ${JSON.stringify(score)}`,
+      `refreshed: ${plural(records.up.length, 'review')}, ${plural(records.down.length, 'own PR')}, ` +
+        `${collected.skipped} of ${plural(collected.total, 'PR')} skipped → ${JSON.stringify(result)}`,
     );
     return await store.updateBadge({
       status: 'ok',
-      score,
+      score: result,
       scoredAt: deps.now(),
       error:
         collected.skipped > 0 ? `${collected.skipped} pull request(s) could not be read` : null,
@@ -134,7 +127,6 @@ export async function refresh(deps: RefreshDeps, reason?: string): Promise<Badge
 }
 
 function failure(error: unknown): Pick<BadgeCache, 'status' | 'notBefore'> {
-  if (error instanceof UpgradeRequiredError) return { status: 'upgrade_required', notBefore: null };
   if (error instanceof GitHubAuthError) return { status: 'bad_token', notBefore: null };
   if (error instanceof GitHubRateLimitError)
     return { status: 'github_error', notBefore: error.resetAtMs };

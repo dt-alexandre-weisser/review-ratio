@@ -1,0 +1,49 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`fixtures > scores fixture anchor 1`] = `
+{
+  "down": 400,
+  "ratio": 1,
+  "up": 400,
+}
+`;
+
+exports[`fixtures > scores fixture clock-skew 1`] = `
+{
+  "down": 400,
+  "ratio": 1,
+  "up": 400,
+}
+`;
+
+exports[`fixtures > scores fixture down-only 1`] = `
+{
+  "down": 95,
+  "ratio": 0,
+  "up": 0,
+}
+`;
+
+exports[`fixtures > scores fixture empty 1`] = `
+{
+  "down": 0,
+  "ratio": null,
+  "up": 0,
+}
+`;
+
+exports[`fixtures > scores fixture mixed 1`] = `
+{
+  "down": 1548,
+  "ratio": 1.58,
+  "up": 2445,
+}
+`;
+
+exports[`fixtures > scores fixture up-only 1`] = `
+{
+  "down": 0,
+  "ratio": null,
+  "up": 384,
+}
+`;

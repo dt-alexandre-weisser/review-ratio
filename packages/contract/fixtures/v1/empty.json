@@ -1,9 +1,0 @@
-{
-  "description": "No activity in the window. The badge shows — and stays visible.",
-  "now": "2026-10-15T12:00:00Z",
-  "payload": {
-    "contractVersion": 1,
-    "up": [],
-    "down": []
-  }
-}

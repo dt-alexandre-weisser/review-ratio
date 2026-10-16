@@ -69,7 +69,7 @@ describe('badgeView', () => {
     expect(view.tone).toBe('neutral');
   });
 
-  it('greys the last ratio with "stale since HH:MM" when the server is unreachable', () => {
+  it('greys the last ratio with "stale since HH:MM" when a refresh failed', () => {
     const scoredAt = new Date(2026, 9, 15, 9, 5).getTime();
     const view = badgeView(
       cache({ status: 'stale', scoredAt, score: { up: 10, down: 5, ratio: 2 } }),
@@ -83,12 +83,12 @@ describe('badgeView', () => {
 
   it('shows placeholders when stale without any score, with the reason', () => {
     const view = badgeView(
-      cache({ status: 'stale', score: null, error: 'server unreachable' }),
+      cache({ status: 'stale', score: null, error: 'classifying files took too long' }),
       NOW,
     );
     expect(view.text).toContain('Ratio —');
     expect(view.stale).toBe(true);
-    expect(view.tooltip).toBe('review-ratio could not refresh: server unreachable');
+    expect(view.tooltip).toBe('review-ratio could not refresh: classifying files took too long');
     const github = badgeView(
       cache({ status: 'github_error', score: null, error: 'GitHub answered 403' }),
       NOW,
@@ -103,15 +103,6 @@ describe('badgeView', () => {
       NOW,
     );
     expect(view).toMatchObject({ stale: true, tone: 'neutral', tooltip: 'stale since 09:05' });
-  });
-
-  it('shows "update the extension" in grey on 426', () => {
-    const view = badgeView(
-      cache({ status: 'upgrade_required', score: { up: 1, down: 1, ratio: 1 } }),
-      NOW,
-    );
-    expect(view.text).toBe('update the extension');
-    expect(view.tone).toBe('neutral');
   });
 
   it('asks for set up without a token and flags a rejected token', () => {

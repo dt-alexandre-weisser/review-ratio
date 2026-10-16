@@ -22,17 +22,18 @@
  *   the draft, and the rescue goes with that credit. When a stronger review of the draft keeps
  *   the credit, the rescue stays on the first review.
  */
-import type { LinesByClassV1, ReviewActionV1 } from '@review-ratio/contract';
-
 import { linesByClass, type Classifier } from '../classify.ts';
 import { normalizeLogin } from '../github/client.ts';
 import type { CompareFile, PullRequestDetails, Review, ReviewSummary } from '../github/types.ts';
+import type { LinesByClass } from '../scoring/classes.ts';
+import { PARAMETERS } from '../scoring/formula.ts';
+import type { ReviewAction } from '../scoring/model.ts';
 import type { ViewedSnapshot } from '../storage.ts';
 import { WINDOW_MS, hoursBetween, parseIso } from '../time.ts';
 import { isOwnedByMe, ownersOf } from './down.ts';
 import type { UpInput } from './types.ts';
 
-export const COMMENT_RANGE_CAP = 20;
+export const COMMENT_RANGE_CAP = PARAMETERS.commentRangeCap;
 
 export interface UpContext {
   /** My login, normalised. */
@@ -48,8 +49,8 @@ export interface UpContext {
 /** Lines per path. */
 type FileLines = Map<string, number>;
 
-/** Maps a GitHub review to a contract action, or `null` when it earns nothing. */
-export function actionOf(review: Review): ReviewActionV1 | null {
+/** Maps a GitHub review to a scored action, or `null` when it earns nothing. */
+export function actionOf(review: Review): ReviewAction | null {
   switch (review.state) {
     case 'APPROVED':
       return 'approve';
@@ -69,7 +70,7 @@ export function actionOf(review: Review): ReviewActionV1 | null {
 }
 
 /** A real review covers code; a thread reply only answers. */
-function strength(action: ReviewActionV1): number {
+function strength(action: ReviewAction): number {
   return action === 'approve' || action === 'request_changes' ? 2 : action === 'comment' ? 1 : 0;
 }
 
@@ -106,7 +107,7 @@ function prFileLines(pr: PullRequestDetails): FileLines {
   return new Map(pr.files.map((f) => [f.path, f.additions + f.deletions]));
 }
 
-function classifyLines(lines: FileLines, classify: Classifier): LinesByClassV1 {
+function classifyLines(lines: FileLines, classify: Classifier): LinesByClass {
   return linesByClass(
     [...lines].map(([path, n]) => ({ path, lines: n })),
     classify,
@@ -142,7 +143,7 @@ async function coveredFiles(
 interface Mine {
   review: Review;
   tMs: number;
-  action: ReviewActionV1;
+  action: ReviewAction;
 }
 
 interface Range {
@@ -266,7 +267,7 @@ export async function upRecordsForPullRequest(
     if (tMs < windowStart) continue;
     const covered = coveredByReview.get(review.id);
 
-    let viewed: LinesByClassV1 = {};
+    let viewed: LinesByClass = {};
     if (covered) {
       if (review.commitOid === pr.headRefOid) {
         viewed = classifyLines(

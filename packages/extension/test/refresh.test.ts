@@ -2,32 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { GitHubAuthError, GitHubError, GitHubRateLimitError } from '../src/lib/github/client.ts';
 import { isRefreshDue, refresh, refreshIfDue, type RefreshDeps } from '../src/lib/refresh.ts';
-import { ServerError, UpgradeRequiredError, type ServerClient } from '../src/lib/server-client.ts';
 import { DEFAULT_SETTINGS } from '../src/lib/settings.ts';
 import { EMPTY_CACHE, STORAGE_VERSION, Store } from '../src/lib/storage.ts';
 import { NOW, fakeGitHub, pr, review } from './helpers/github.ts';
 import { memoryStorage } from './helpers/memory-storage.ts';
 
-function server(overrides: Partial<ServerClient> = {}): ServerClient & { scored: unknown[] } {
-  const scored: unknown[] = [];
-  return {
-    scored,
-    fetchClasses: vi.fn(() =>
-      Promise.resolve([{ name: 'test' as const, globs: ['**/*.test.ts'] }]),
-    ),
-    score: vi.fn((payload) => {
-      scored.push(payload);
-      return Promise.resolve({ up: 400, down: 0, ratio: null });
-    }),
-    ...overrides,
-  };
-}
-
 async function setup(
   options: {
     token?: string;
-    serverUrl?: string;
-    server?: ReturnType<typeof server>;
     github?: ReturnType<typeof fakeGitHub>;
   } = {},
 ) {
@@ -36,19 +18,16 @@ async function setup(
   await store.setSettings({
     ...DEFAULT_SETTINGS,
     token: options.token ?? 'tok',
-    serverUrl: options.serverUrl ?? DEFAULT_SETTINGS.serverUrl,
   });
   let clock = NOW;
-  const srv = options.server ?? server();
   const github = options.github ?? fakeGitHub({ prs: [pr({ myReviews: [review({ id: 'r1' })] })] });
   const deps: RefreshDeps = {
     store,
     now: () => clock,
     github: vi.fn(() => github),
-    server: vi.fn(() => srv),
     randomUUID: () => '00000000-0000-4000-8000-000000000001',
   };
-  return { area, store, deps, srv, github, advance: (ms: number) => (clock += ms) };
+  return { area, store, deps, github, advance: (ms: number) => (clock += ms) };
 }
 
 describe('isRefreshDue', () => {
@@ -77,8 +56,8 @@ describe('isRefreshDue', () => {
 });
 
 describe('refresh', () => {
-  it('scores the window and caches the result', async () => {
-    const { area, deps, srv } = await setup();
+  it('scores the window locally and caches the result', async () => {
+    const { area, deps } = await setup();
     const cache = await refresh(deps);
     expect(cache).toMatchObject({
       status: 'ok',
@@ -87,13 +66,18 @@ describe('refresh', () => {
       error: null,
       refreshStartedAt: null,
     });
-    expect(srv.scored).toHaveLength(1);
-    expect(srv.scored[0]).toMatchObject({
-      contractVersion: 1,
-      up: [{ action: 'approve' }],
-      down: [],
-    });
     expect(area.data['storageVersion']).toBe(STORAGE_VERSION);
+  });
+
+  it('balances a review and an own PR of the same size at ratio 1', async () => {
+    const github = fakeGitHub({
+      prs: [
+        pr({ number: 1, myReviews: [review()] }),
+        pr({ number: 2, author: { login: 'me', type: 'User' }, createdAt: '2026-10-15T11:00:00Z' }),
+      ],
+    });
+    const { deps } = await setup({ github });
+    expect((await refresh(deps)).score).toEqual({ up: 400, down: 400, ratio: 1 });
   });
 
   it('counts refreshes that never finish, and resets the count when one does', async () => {
@@ -104,14 +88,8 @@ describe('refresh', () => {
     expect(cache).toMatchObject({ status: 'ok', unfinishedRefreshes: 0 });
   });
 
-  it('stops and blames the server when its class globs are too expensive', async () => {
-    const srv = server({
-      fetchClasses: () =>
-        Promise.resolve([
-          { name: 'docs' as const, globs: Array.from({ length: 400 }, (_, i) => `**/*${i}*.md`) },
-        ]),
-    });
-    const { deps } = await setup({ server: srv });
+  it('stops when classifying the files takes too long', async () => {
+    const { deps } = await setup();
     const realNow = performance.now.bind(performance);
     let shift = 0;
     const spy = vi.spyOn(performance, 'now').mockImplementation(() => realNow() + (shift += 50));
@@ -119,7 +97,7 @@ describe('refresh', () => {
       const cache = await refresh(deps);
       expect(cache).toMatchObject({
         status: 'stale',
-        error: expect.stringContaining('class globs'),
+        error: 'classifying files took too long',
       });
     } finally {
       spy.mockRestore();
@@ -127,7 +105,8 @@ describe('refresh', () => {
   });
 
   it('does nothing but flag the badge without a token', async () => {
-    const { deps, srv, store } = await setup({ token: '' });
+    const { deps, github, store } = await setup({ token: '' });
+    const viewer = vi.spyOn(github, 'viewer');
     const log = vi.fn();
     await store.migrate();
     await store.updateBadge({ status: 'ok', unfinishedRefreshes: 1 });
@@ -135,7 +114,7 @@ describe('refresh', () => {
       status: 'no_token',
       unfinishedRefreshes: 0,
     });
-    expect(srv.scored).toHaveLength(0);
+    expect(viewer).not.toHaveBeenCalled();
     // Logged when the token goes away, not again on every page load.
     await refresh({ ...deps, log });
     expect(log.mock.calls).toEqual([['refresh skipped: no GitHub token']]);
@@ -154,47 +133,20 @@ describe('refresh', () => {
     ]);
   });
 
-  it('asks the server for the globs first, and spends no GitHub call when it is down', async () => {
-    const github = fakeGitHub({ prs: [] });
-    const viewer = vi.spyOn(github, 'viewer');
-    const { deps } = await setup({
-      github,
-      server: server({
-        fetchClasses: () => Promise.reject(new ServerError('server unreachable', null)),
-      }),
-    });
-    expect((await refresh(deps)).status).toBe('stale');
-    expect(viewer).not.toHaveBeenCalled();
-  });
-
-  it('refuses a remote server over plain http', async () => {
-    const { deps, srv } = await setup({ serverUrl: 'http://rr.example.com' });
-    const cache = await refresh(deps);
-    expect(cache).toMatchObject({ status: 'stale', error: expect.stringContaining('https') });
-    expect(srv.fetchClasses).not.toHaveBeenCalled();
-  });
-
-  it('keeps the last score and marks it stale when the server is down', async () => {
-    const srv = server();
-    const { deps, store, advance } = await setup({ server: srv });
+  it('keeps the last score and marks it stale when a refresh fails', async () => {
+    const github = fakeGitHub({ prs: [pr({ myReviews: [review({ id: 'r1' })] })] });
+    const { deps, store, advance } = await setup({ github });
     await refresh(deps);
     advance(11 * 60_000);
-    srv.score = () => Promise.reject(new ServerError('server unreachable (Failed to fetch)', null));
+    github.viewer = () => Promise.reject(new Error('Failed to fetch'));
     const cache = await refresh(deps);
     expect(cache).toMatchObject({
       status: 'stale',
       score: { up: 400 },
       scoredAt: NOW,
-      error: expect.stringContaining('unreachable'),
+      error: 'Failed to fetch',
     });
     expect((await store.getBadge()).attemptedAt).toBe(NOW + 11 * 60_000);
-  });
-
-  it('flags 426 as upgrade required', async () => {
-    const { deps } = await setup({
-      server: server({ fetchClasses: () => Promise.reject(new UpgradeRequiredError()) }),
-    });
-    expect((await refresh(deps)).status).toBe('upgrade_required');
   });
 
   it('flags a rejected token', async () => {
@@ -204,7 +156,7 @@ describe('refresh', () => {
     expect((await refresh(deps)).status).toBe('bad_token');
   });
 
-  it('flags GitHub errors apart from server errors, and backs off until a rate limit resets', async () => {
+  it('flags GitHub errors apart from other failures, and backs off until a rate limit resets', async () => {
     const down = fakeGitHub({ prs: [] });
     down.viewer = () => Promise.reject(new GitHubError('GitHub answered 502', 502));
     const first = await setup({ github: down });
@@ -264,13 +216,13 @@ describe('refresh', () => {
 
 describe('refreshIfDue', () => {
   it('refreshes at most once every 5 minutes', async () => {
-    const { deps, srv, advance } = await setup();
+    const { deps, store, advance } = await setup();
     expect((await refreshIfDue(deps)).refreshed).toBe(true);
     advance(4 * 60_000);
     expect((await refreshIfDue(deps)).refreshed).toBe(false);
     advance(60_000);
     expect((await refreshIfDue(deps)).refreshed).toBe(true);
-    expect(srv.scored).toHaveLength(2);
+    expect((await store.getBadge()).scoredAt).toBe(NOW + 5 * 60_000);
   });
 
   it('passes the reason on to the log', async () => {

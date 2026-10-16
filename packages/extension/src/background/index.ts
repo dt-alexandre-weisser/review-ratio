@@ -8,7 +8,6 @@ import { createGitHubClient } from '../lib/github/client.ts';
 import { isRequest, type BadgeUpdate, type Request, type Response } from '../lib/messages.ts';
 import { refresh, refreshIfDue, type RefreshDeps } from '../lib/refresh.ts';
 import { recordPlacement } from '../lib/placement.ts';
-import { createServerClient } from '../lib/server-client.ts';
 import { Store, chromeStorageArea } from '../lib/storage.ts';
 import { isTrustedFor } from './senders.ts';
 
@@ -36,7 +35,6 @@ const deps: RefreshDeps = {
   store,
   now: () => Date.now(),
   github: (token) => createGitHubClient({ token, fetchImpl: loggedFetch }),
-  server: (baseUrl) => createServerClient(baseUrl, loggedFetch),
   randomUUID: () => crypto.randomUUID(),
   log: (message) => {
     console.info(`[review-ratio] ${message}`);

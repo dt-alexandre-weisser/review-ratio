@@ -1,0 +1,56 @@
+/* On top of options.css: the tables and the glob list of the scoring page. */
+
+.formula {
+  margin: 8px 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: pre;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+table.values {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+
+table.values th,
+table.values td {
+  padding: 4px 16px 4px 0;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+table.values th {
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+table.values td:last-child {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#class-globs > li {
+  margin: 12px 0;
+}
+
+ul.globs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+ul.globs code {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}

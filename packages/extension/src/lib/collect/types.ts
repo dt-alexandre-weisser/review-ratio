@@ -1,14 +1,15 @@
-import type { LinesByClassV1, ReviewActionV1 } from '@review-ratio/contract';
+import type { LinesByClass } from '../scoring/classes.ts';
+import type { ReviewAction } from '../scoring/model.ts';
 
 /** An ↑ record before rounding. */
 export interface UpInput {
   /** Review node id, to key the Viewed snapshot. */
   reviewId: string;
   tMs: number;
-  action: ReviewActionV1;
-  linesByClass: LinesByClassV1;
-  commentedLinesByClass: LinesByClassV1;
-  viewedLinesByClass: LinesByClassV1;
+  action: ReviewAction;
+  linesByClass: LinesByClass;
+  commentedLinesByClass: LinesByClass;
+  viewedLinesByClass: LinesByClass;
   waitedHoursWithoutReview: number;
 }
 
@@ -16,6 +17,5 @@ export interface UpInput {
 export interface DownInput {
   prKey: string;
   readyAtMs: number;
-  closedAtMs: number | null;
-  linesByClass: LinesByClassV1;
+  linesByClass: LinesByClass;
 }

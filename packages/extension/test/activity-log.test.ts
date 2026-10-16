@@ -260,14 +260,14 @@ describe('loggingFetch', () => {
       now,
     );
     await fetchLogged(new Request('https://api.github.com/graphql#x', { method: 'POST' }));
-    await fetchLogged(new URL('http://127.0.0.1:8787/classes'));
-    await fetchLogged('http://127.0.0.1:8787/score', { method: 'post', body: '{"up":[]}' });
+    await fetchLogged(new URL('https://github.com/DiliTrust/app/pull/12/files'));
+    await fetchLogged('https://api.github.com/x', { method: 'post', body: '{"up":[]}' });
     await log.flush();
     const calls = (await readActivity(area, now())).reverse() as CallEntry[];
     expect(calls.map((c) => [c.method, c.url, c.detail])).toEqual([
       ['POST', 'https://api.github.com/graphql', null],
-      ['GET', 'http://127.0.0.1:8787/classes', null],
-      ['POST', 'http://127.0.0.1:8787/score', '9 B sent'],
+      ['GET', 'https://github.com/DiliTrust/app/pull/12/files', null],
+      ['POST', 'https://api.github.com/x', '9 B sent'],
     ]);
   });
 
@@ -278,11 +278,11 @@ describe('loggingFetch', () => {
       log,
       now,
     );
-    await expect(fetchLogged('http://127.0.0.1:9/classes')).rejects.toThrow('Failed to fetch');
+    await expect(fetchLogged('https://api.github.com/user')).rejects.toThrow('Failed to fetch');
     // A rejection that is not an Error, as a broken polyfill could produce.
     // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
     const notAnError = loggingFetch(() => Promise.reject('boom'), log, now);
-    await expect(notAnError('http://127.0.0.1:9/score')).rejects.toBe('boom');
+    await expect(notAnError('https://api.github.com/user')).rejects.toBe('boom');
     await log.flush();
     const calls = (await readActivity(area, now())).reverse() as CallEntry[];
     expect(calls.map((c) => [c.status, c.error])).toEqual([
@@ -313,7 +313,7 @@ describe('describeBody', () => {
   });
 
   it('gives the size of any other body, and nothing without a text body', () => {
-    expect(describeBody('{"contractVersion":1}')).toBe('21 B sent');
+    expect(describeBody('{"mergeable":"clean"}')).toBe('21 B sent');
     expect(describeBody(`{"up":"${'x'.repeat(2048)}"}`)).toBe('2.0 kB sent');
     expect(describeBody('{"query": not json')).toBe('18 B sent');
     expect(describeBody('{"query":42}')).toBe('12 B sent');
@@ -348,7 +348,7 @@ describe('rows, summary and text', () => {
       ...call({
         at: NOW + 2000,
         method: 'POST',
-        url: 'http://127.0.0.1:8787/score',
+        url: 'https://github.com/DiliTrust/app/pull/12/files',
         detail: '1.2 kB sent',
         ms: 1500,
       }),
@@ -380,7 +380,7 @@ describe('rows, summary and text', () => {
     });
     expect(rowOf(entries[0]!).time).toMatch(/^\d\d:\d\d:\d\d$/);
     expect(rowOf(entries[1]!)).toMatchObject({
-      what: 'POST 127.0.0.1:8787/score',
+      what: 'POST github.com/DiliTrust/app/pull/12/files',
       detail: '1.2 kB sent',
       result: '200',
       duration: '1.5 s',
@@ -400,9 +400,9 @@ describe('rows, summary and text', () => {
 
   it('counts the calls per host and the failures', () => {
     expect(summarize(entries)).toBe(
-      '4 calls in the last 30 minutes: 2 to api.github.com, 1 to 127.0.0.1:8787, 1 to unknown host. 2 failed.',
+      '4 calls in the last 30 minutes: 2 to api.github.com, 1 to github.com, 1 to unknown host. 2 failed.',
     );
-    expect(summarize([entries[1]!])).toBe('1 call in the last 30 minutes: 1 to 127.0.0.1:8787.');
+    expect(summarize([entries[1]!])).toBe('1 call in the last 30 minutes: 1 to github.com.');
     expect(summarize([entries[0]!])).toBe('No calls in the last 30 minutes.');
     expect(summarize([])).toBe('No calls in the last 30 minutes.');
   });
@@ -414,7 +414,7 @@ describe('rows, summary and text', () => {
       /^\d\d:\d\d:\d\d {2}GET api\.github\.com\/x {2}→ failed in 25\.0 s {2}\(signal timed out\)$/,
     );
     expect(lines[1]).toMatch(
-      /POST 127\.0\.0\.1:8787\/score {2}→ 200 in 1\.5 s {2}\(1\.2 kB sent\)$/,
+      /POST github\.com\/DiliTrust\/app\/pull\/12\/files {2}→ 200 in 1\.5 s {2}\(1\.2 kB sent\)$/,
     );
     expect(lines[2]).toMatch(/ {2}— refreshed: 1 review, 1 own PR$/);
     expect(toText([])).toBe('');
@@ -459,17 +459,17 @@ describe('request bodies', () => {
 
   it('keeps other bodies as text, cut at a size', async () => {
     const { area, log, now } = setup();
-    log.call(sent({ method: 'POST' }), '{"contractVersion":1,"up":[]}');
+    log.call(sent({ method: 'POST' }), '{"version":1,"up":[]}');
     log.call(sent({ method: 'POST' }), 'x'.repeat(MAX_BODY_TEXT + 10));
     log.call(sent({ method: 'POST' }), '{"query": broken');
     await log.flush();
-    const [broken, big, score] = (await readActivity(area, now())) as CallEntry[];
-    expect(score?.body).toEqual({
+    const [broken, big, plain] = (await readActivity(area, now())) as CallEntry[];
+    expect(plain?.body).toEqual({
       kind: 'text',
-      text: '{"contractVersion":1,"up":[]}',
+      text: '{"version":1,"up":[]}',
       truncated: false,
     });
-    expect(formatBody(score!.body!, null)).toBe('{\n  "contractVersion": 1,\n  "up": []\n}');
+    expect(formatBody(plain!.body!, null)).toBe('{\n  "version": 1,\n  "up": []\n}');
     expect(big?.body).toMatchObject({ kind: 'text', truncated: true });
     expect(formatBody(big!.body!, null)).toMatch(/\n… cut at 65,536 characters$/);
     expect(broken?.body).toEqual({ kind: 'text', text: '{"query": broken', truncated: false });

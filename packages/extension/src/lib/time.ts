@@ -1,4 +1,4 @@
-import { HOUR_MS } from '@review-ratio/contract';
+import { HOUR_MS } from './scoring/rounding.ts';
 
 export const DAY_MS = 24 * HOUR_MS;
 /** The rolling window of the ratio, on both sides. */

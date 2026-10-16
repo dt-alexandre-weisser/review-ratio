@@ -45,7 +45,7 @@ function ctx(
 }
 
 describe('actionOf', () => {
-  it('maps review states to contract actions', () => {
+  it('maps review states to the actions the formula weighs', () => {
     expect(actionOf(review({ state: 'APPROVED' }))).toBe('approve');
     expect(actionOf(review({ state: 'CHANGES_REQUESTED' }))).toBe('request_changes');
     expect(actionOf(review({ state: 'DISMISSED' }))).toBe('approve');

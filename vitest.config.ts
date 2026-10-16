@@ -11,12 +11,15 @@ export default defineConfig({
         '**/*.d.ts',
         'packages/extension/src/content/index.ts',
         'packages/extension/src/options/options.ts',
-        'packages/server/src/node.ts',
       ],
       reporter: ['text', 'lcov'],
       thresholds: {
-        'packages/contract/src/**': { lines: 95, functions: 95, branches: 90, statements: 95 },
-        'packages/server/src/**': { lines: 95, functions: 95, branches: 90, statements: 95 },
+        'packages/extension/src/lib/scoring/**': {
+          lines: 95,
+          functions: 95,
+          branches: 90,
+          statements: 95,
+        },
         'packages/extension/src/**': { lines: 90, functions: 90, branches: 85, statements: 90 },
       },
     },

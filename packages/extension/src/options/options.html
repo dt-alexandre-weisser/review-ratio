@@ -11,7 +11,14 @@
       <h1>review-ratio</h1>
       <p class="lead">
         A private badge in the GitHub header: how much you review compared to how much you ask to be
-        reviewed. Nobody else sees your ratio.
+        reviewed. Nobody else sees your ratio. The extension computes it in this browser: nothing
+        leaves it except GitHub API calls made with your token.
+      </p>
+      <p class="callout">
+        <a id="scoring-link" href="scoring.html" target="_blank" rel="noopener"
+          >How Review Points are counted</a
+        >
+        <span class="hint">The whole formula, its weights and the file classes.</span>
       </p>
 
       <form id="settings">
@@ -57,23 +64,6 @@
           ></textarea>
         </section>
 
-        <section>
-          <h2>Server</h2>
-          <label for="server-url">Server URL</label>
-          <input
-            id="server-url"
-            name="serverUrl"
-            type="url"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="http://127.0.0.1:8787"
-          />
-          <p class="hint">
-            The server receives numbers only: no login, no repository, no PR number, no file name.
-            Open DevTools on the service worker to see the exact payload.
-          </p>
-        </section>
-
         <div class="actions">
           <button type="submit" id="save" class="primary">Save</button>
           <button type="button" id="test">Test connection</button>
@@ -115,10 +105,10 @@
         </div>
         <p class="hint">
           Every call this extension made, newest first, with what it sent: open a call's payload to
-          read the GraphQL query and variables, or the numbers sent to the server. The badge
-          refreshes when a github.com page loads or comes back into view, at most every 5 minutes.
-          The log stays in this browser's memory and is gone when the browser closes. It shows
-          repository names, so read it before sharing it.
+          read the GraphQL query and variables. Every call goes to GitHub. The badge refreshes when
+          a github.com page loads or comes back into view, at most every 5 minutes. The log stays in
+          this browser's memory and is gone when the browser closes. It shows repository names, so
+          read it before sharing it.
         </p>
         <p id="activity-summary">No calls in the last 30 minutes.</p>
         <table id="activity">
