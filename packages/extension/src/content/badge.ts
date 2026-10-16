@@ -84,6 +84,12 @@ function isVisible(el: Element): boolean {
 
 const SEARCH_WORD = /\bsearch\b/i;
 
+/** The group around a search control, when it is inside the header, else the control. */
+function wholeControl(el: Element, header: Element): Element {
+  const group = el.closest(GROUPS);
+  return group && group !== header && header.contains(group) ? group : el;
+}
+
 /**
  * The search of the header, by GitHub's markup, else a visible control whose label says
  * "search", else one whose text does.
@@ -91,7 +97,7 @@ const SEARCH_WORD = /\bsearch\b/i;
 export function findSearch(header: Element): Element | null {
   for (const selector of SEARCH_SELECTORS) {
     const el = header.querySelector(selector);
-    if (el) return el.closest(GROUPS) ?? el;
+    if (el) return wholeControl(el, header);
   }
   const controls = [
     ...header.querySelectorAll('button, input, [role="button"], [role="combobox"]'),
@@ -102,7 +108,7 @@ export function findSearch(header: Element): Element | null {
     ),
   );
   const found = labelled ?? controls.find((el) => SEARCH_WORD.test(el.textContent));
-  return found ? (found.closest(GROUPS) ?? found) : null;
+  return found ? wholeControl(found, header) : null;
 }
 
 function isRow(el: Element): boolean {

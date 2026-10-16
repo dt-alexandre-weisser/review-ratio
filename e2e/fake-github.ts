@@ -106,7 +106,7 @@ const HEADERS = {
       <div data-testid="top-nav-left" style="${ROW}"><button aria-label="Open menu">=</button><a aria-label="Dashboard" href="/">logo</a></div>
       <div data-testid="top-nav-center" style="${ROW};flex:1">
         <nav aria-label="Breadcrumbs"><a href="/DiliTrust">DiliTrust</a> / <a href="/DiliTrust/top-secret-repo">top-secret-repo</a></nav>
-        <div class="Search-module__searchButtonGroup__aetw5" data-component="ButtonGroup" style="display:flex;margin-left:auto">
+        <div class="Search-module__searchButtonGroup__aetw5" data-component="ButtonGroup" style="display:flex">
           <div><button class="Search-module__searchButton__aiE0a" aria-label="Open quick search dialog, type / to search" style="border-radius:6px 0 0 6px">Type / to search</button></div>
           <div><button aria-label="Command palette" style="border-radius:0 6px 6px 0">&gt;</button></div>
         </div>

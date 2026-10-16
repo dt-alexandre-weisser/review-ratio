@@ -116,7 +116,8 @@ function onNavigate(): void {
   graceFrom = Date.now();
   window.clearTimeout(graceCheck);
   graceCheck = window.setTimeout(ensureMounted, FLOATING_AFTER_MS);
-  ensureMounted();
+  // After GitHub's React takes over the new header, as on the first load.
+  window.requestIdleCallback(ensureMounted, { timeout: 1_000 });
 }
 
 let resizeTimer = 0;

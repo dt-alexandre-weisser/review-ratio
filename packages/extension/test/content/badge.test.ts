@@ -106,6 +106,15 @@ describe('finding the search bar', () => {
     expect((spot.before as HTMLElement).className).toBe('Group');
   });
 
+  it('never climbs out of the header for the search group', () => {
+    document.body.innerHTML = `
+      <div role="group"><header id="h" style="display:flex">
+        <a href="/">logo</a><input placeholder="Search" id="q">
+      </header></div>`;
+    expect(findSearch(findHeader(document)!)?.id).toBe('q');
+    expect(searchSpot(document)?.container.id).toBe('h');
+  });
+
   it('prefers a control labelled search to one whose text mentions it', () => {
     document.body.innerHTML = `
       <header style="display:flex">

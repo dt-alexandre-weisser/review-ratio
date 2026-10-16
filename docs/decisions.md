@@ -208,7 +208,7 @@ question below.
   `body.logged-in`, GitHub's own signals).
 - ↑ and ↓ use `--fgColor-success` and `--fgColor-danger`, the colours of GitHub's added and removed
   line counts, which follow the user's theme: green and red in light and dark, blue and orange in
-  the colour-blind themes. The diff-specific `--diffBlob-*-fgColor` tokens resolve to the default
+  the protanopia and deuteranopia themes, blue and red in the tritanopia ones. The diff-specific `--diffBlob-*-fgColor` tokens resolve to the default
   text colour, so they would not colour anything.
 - The content script reports each change of placement. When the badge floats it also sends what
   it saw: the path from the search up to the header with each level's `display`, and the header's

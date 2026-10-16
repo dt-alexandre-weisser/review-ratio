@@ -59,11 +59,15 @@ test('shows the ratio in the GitHub header and sends numbers only', async ({
   await expect(badge).toHaveAttribute('data-placement', 'header');
   await expect(badge).toHaveAttribute('title', /given \/ asked/);
   // Just left of the search box, in the header's own row, outside GitHub's search group.
-  await expect(
-    github.locator(
-      '[data-testid="top-nav-center"] > #review-ratio-badge + [data-component="ButtonGroup"]',
-    ),
-  ).toHaveCount(1);
+  const group = github.locator(
+    '[data-testid="top-nav-center"] > #review-ratio-badge + [data-component="ButtonGroup"]',
+  );
+  await expect(group).toHaveCount(1);
+  // Side by side: the badge's right edge meets the search box, a gap apart.
+  const badgeBox = (await badge.boundingBox())!;
+  const searchBox = (await group.boundingBox())!;
+  expect(searchBox.x - (badgeBox.x + badgeBox.width)).toBeGreaterThanOrEqual(0);
+  expect(searchBox.x - (badgeBox.x + badgeBox.width)).toBeLessThanOrEqual(24);
   // ↑ and ↓ in GitHub's colours for added and removed lines, from the theme when it sets them.
   const up = badge.locator('.review-ratio-up');
   const down = badge.locator('.review-ratio-down');
