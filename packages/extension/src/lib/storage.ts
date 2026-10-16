@@ -5,14 +5,9 @@
  * Everything read back is validated: a value written by another build, or corrupted, is dropped
  * instead of breaking every refresh.
  */
-import {
-  FILE_CLASSES,
-  type FileClass,
-  type LinesByClassV1,
-  type ScoreResponseV1,
-} from '@review-ratio/contract';
-
 import type { CompareFile } from './github/types.ts';
+import { FILE_CLASSES, type LinesByClass } from './scoring/classes.ts';
+import type { Score } from './scoring/formula.ts';
 import { coerceSettings, type Settings } from './settings.ts';
 
 /** Bump when the shape of stored activity data changes; older data is then forgotten. */
@@ -21,12 +16,10 @@ export const STORAGE_VERSION = 2;
 export type BadgeStatus =
   /** The last refresh succeeded. */
   | 'ok'
-  /** The review-ratio server could not be reached or answered an error. */
+  /** The refresh failed for another reason than GitHub, e.g. the classification budget. */
   | 'stale'
   /** GitHub could not be read: unreachable, rate limited, or a permission is missing. */
   | 'github_error'
-  /** The server retired our contract major. */
-  | 'upgrade_required'
   /** No token configured yet. */
   | 'no_token'
   /** GitHub rejected the token. */
@@ -34,9 +27,9 @@ export type BadgeStatus =
 
 export interface BadgeCache {
   status: BadgeStatus;
-  /** Last score received from the server, kept through failures. */
-  score: ScoreResponseV1 | null;
-  /** When `score` was received. */
+  /** Last score computed, kept through failures. */
+  score: Score | null;
+  /** When `score` was computed. */
   scoredAt: number | null;
   /** When a refresh was last attempted, successful or not. */
   attemptedAt: number | null;
@@ -61,14 +54,9 @@ export const EMPTY_CACHE: Readonly<BadgeCache> = Object.freeze({
   error: null,
 });
 
-export interface PublishedClass {
-  name: FileClass;
-  globs: string[];
-}
-
 /** The files of my reviewed range I had marked Viewed, by class. */
 export interface ViewedSnapshot {
-  linesByClass: LinesByClassV1;
+  linesByClass: LinesByClass;
   takenAt: number;
 }
 
@@ -79,6 +67,7 @@ export interface StorageArea {
   remove(keys: string[]): Promise<void>;
 }
 
+// 'classes' held the globs older versions fetched from a server: forgotten with the rest.
 const ACTIVITY_KEYS = ['badge', 'prKeys', 'viewedSnapshots', 'compareCache', 'classes'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -94,14 +83,14 @@ function isNullableNumber(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isFinite(value));
 }
 
-export function isLinesByClass(value: unknown): value is LinesByClassV1 {
+export function isLinesByClass(value: unknown): value is LinesByClass {
   if (!isRecord(value)) return false;
   return Object.entries(value).every(
     ([key, n]) => (FILE_CLASSES as readonly string[]).includes(key) && isCount(n),
   );
 }
 
-function isScore(value: unknown): value is ScoreResponseV1 {
+function isScore(value: unknown): value is Score {
   return (
     isRecord(value) &&
     isCount(value['up']) &&
@@ -114,7 +103,6 @@ const STATUSES: ReadonlySet<string> = new Set<BadgeStatus>([
   'ok',
   'stale',
   'github_error',
-  'upgrade_required',
   'no_token',
   'bad_token',
 ]);

@@ -1,0 +1,22 @@
+{
+  "description": "Hour rounding can put a timestamp slightly in the future of the clock. The record counts at full weight.",
+  "now": "2026-10-15T12:10:00Z",
+  "records": {
+    "up": [
+      {
+        "t": "2026-10-15T13:00:00Z",
+        "action": "approve",
+        "linesByClass": { "production": 400 },
+        "commentedLinesByClass": {},
+        "viewedLinesByClass": {},
+        "waitedHoursWithoutReview": 0
+      }
+    ],
+    "down": [
+      {
+        "readyAt": "2026-10-15T13:00:00Z",
+        "linesByClass": { "production": 400 }
+      }
+    ]
+  }
+}

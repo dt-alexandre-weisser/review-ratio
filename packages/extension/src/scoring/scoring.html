@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>How Review Points are counted</title>
+    <link rel="stylesheet" href="options.css" />
+    <link rel="stylesheet" href="scoring.css" />
+  </head>
+  <body>
+    <main>
+      <h1>How Review Points are counted</h1>
+      <p class="lead">
+        The badge shows <strong>↑ RP</strong>, the Review Points you gave by reviewing, and
+        <strong>↓ RP</strong>, the Review Points you asked for with your own PRs in review. Both
+        sides use the same unit. This page is the whole formula: the extension computes your badge
+        in this browser with exactly these weights, and nothing leaves it except GitHub API calls
+        made with your token.
+      </p>
+
+      <section>
+        <h2>Window</h2>
+        <p>
+          A rolling <span data-value="windowDays"></span>-day window (<span
+            data-value="windowHours"
+          ></span
+          >h) on both sides: the reviews you submitted, and your PRs marked ready for review. Each
+          record then decays with its age.
+        </p>
+      </section>
+
+      <section>
+        <h2>Weighted lines</h2>
+        <p>
+          Every count of lines is weighted by its file class, on both sides, so ↑ and ↓ stay in the
+          same unit:
+        </p>
+        <pre class="formula">weighted lines = Σ classes  class weight × lines of that class</pre>
+        <table class="values">
+          <thead>
+            <tr>
+              <th>Class</th>
+              <th>Weight</th>
+            </tr>
+          </thead>
+          <tbody id="class-weights"></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>↑ RP, per review you submit</h2>
+        <pre class="formula">
+↑ review = ( covered × action weight
+           + commented × comment multiplier
+           + viewed × viewed bonus )
+         × decay(age of the review)
+         × rescue</pre>
+        <ol>
+          <li>
+            <strong>covered</strong>: the weighted lines changed since the commit of your previous
+            review on the PR, or the full diff on your first review.
+          </li>
+          <li>
+            <strong>action weight</strong>: set by the kind of review.
+            <table class="values">
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th>Weight</th>
+                </tr>
+              </thead>
+              <tbody id="action-weights"></tbody>
+            </table>
+          </li>
+          <li>
+            <strong>commented</strong>: the weighted lines of your review comments' ranges
+            (<code>start_line..line</code>), at most <span data-value="commentRangeCap"></span>
+            lines per comment, times the comment multiplier of
+            <span data-value="commentMultiplier"></span>. A thread reply without a review earns this
+            term only.
+          </li>
+          <li>
+            <strong>viewed</strong>: the weighted lines of the files you marked Viewed, times the
+            viewed bonus of <span data-value="viewedBonus"></span>.
+          </li>
+          <li>
+            <strong>rescue</strong>: ×<span data-value="rescueMultiplier"></span> when the PR had
+            waited more than <span data-value="rescueAfterHours"></span>h with no review when you
+            reviewed it. Otherwise the term changes nothing.
+          </li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>↓ RP, per PR you own</h2>
+        <pre class="formula">
+↓ PR = size tiers(weighted lines of the PR) × decay(time since ready for review)</pre>
+        <p>
+          The size tiers apply to marginal lines, so there is no cliff at a tier boundary. They
+          apply to ↓ only: on ↑ they would make large PRs attractive to reviewers.
+        </p>
+        <table class="values">
+          <thead>
+            <tr>
+              <th>Weighted lines</th>
+              <th>Each line counts</th>
+            </tr>
+          </thead>
+          <tbody id="size-tiers"></tbody>
+        </table>
+        <p>
+          The clock starts when the PR is marked ready for review, so draft time does not count. A
+          review received, a merge or a close does not reset it: the PR counts until the end of the
+          window.
+        </p>
+      </section>
+
+      <section>
+        <h2>Decay</h2>
+        <p>
+          Full weight for the first <span data-value="decayFullHours"></span>h, then linear down to
+          <span data-value="decayFloor"></span> at the end of the window, then nothing. A record
+          dated up to <span data-value="futureToleranceHours"></span>h in the future counts as brand
+          new: clocks drift. Further in the future, it counts for nothing.
+        </p>
+      </section>
+
+      <section>
+        <h2>Rounding</h2>
+        <ul>
+          <li>Times round to the nearest hour.</li>
+          <li>
+            Line counts round to the nearest <span data-value="linesGranularity"></span>. Commented
+            lines round to a multiple of <span data-value="linesGranularity"></span> without bias,
+            in a direction drawn from a hash of the review, so a one-line comment keeps its expected
+            value and the badge does not flicker.
+          </li>
+          <li>
+            At most the newest <span data-value="maxUpRecords"></span> reviews and
+            <span data-value="maxDownRecords"></span> PRs count.
+          </li>
+          <li>↑ and ↓ round to whole points.</li>
+          <li>
+            The ratio is ↑ / ↓, rounded to <span data-value="ratioDecimals"></span> decimals. When ↓
+            is zero there is no ratio: the badge shows ∞ when ↑ is above zero, and — when both are
+            zero.
+          </li>
+        </ul>
+        <p>
+          With these weights, a plain approval of a PR under
+          <span data-value="firstTierLines"></span> weighted lines balances one PR of the same size
+          of your own, at the same age, at exactly ratio one. Comments, Viewed files and rescues
+          push the ratio up; large PRs of your own pull it down.
+        </p>
+      </section>
+
+      <section>
+        <h2>File classes</h2>
+        <p>
+          A path is matched against each class below in order, and takes the first class with a
+          matching glob. A path that matches nothing is <code data-value="defaultClass"></code>. The
+          globs use picomatch syntax, match the repository-relative path, are case-sensitive and
+          match dotfiles.
+        </p>
+        <ol id="class-globs"></ol>
+      </section>
+    </main>
+    <script src="scoring.js"></script>
+  </body>
+</html>

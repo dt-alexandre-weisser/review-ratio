@@ -5,8 +5,8 @@
  *   node scripts/build.mjs           # one build
  *   node scripts/build.mjs --watch   # rebuild on change
  *
- * The background worker is an ES module; the content script and the options page are IIFEs
- * because Chrome runs them as classic scripts.
+ * The background worker is an ES module; the content script, the options page and the scoring
+ * page are IIFEs because Chrome runs them as classic scripts.
  */
 import { context } from 'esbuild';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, watchFile, writeFileSync } from 'node:fs';
@@ -37,7 +37,11 @@ const common = {
 const builds = [
   { entryPoints: { background: 'src/background/index.ts' }, format: 'esm' },
   {
-    entryPoints: { content: 'src/content/index.ts', options: 'src/options/options.ts' },
+    entryPoints: {
+      content: 'src/content/index.ts',
+      options: 'src/options/options.ts',
+      scoring: 'src/scoring/scoring.ts',
+    },
     format: 'iife',
   },
 ];
@@ -47,6 +51,8 @@ const STATIC_FILES = [
   'package.json',
   'src/options/options.html',
   'src/options/options.css',
+  'src/scoring/scoring.html',
+  'src/scoring/scoring.css',
   'src/content/content.css',
 ];
 
@@ -56,6 +62,8 @@ function copyStatic() {
   writeFileSync(join(dist, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   copyFileSync(join(root, 'src/options/options.html'), join(dist, 'options.html'));
   copyFileSync(join(root, 'src/options/options.css'), join(dist, 'options.css'));
+  copyFileSync(join(root, 'src/scoring/scoring.html'), join(dist, 'scoring.html'));
+  copyFileSync(join(root, 'src/scoring/scoring.css'), join(dist, 'scoring.css'));
   copyFileSync(join(root, 'src/content/content.css'), join(dist, 'content.css'));
   writeIcons(join(dist, 'icons'));
 }

@@ -1,4 +1,3 @@
-import { PUBLISHED_CLASSES } from '@review-ratio/server';
 import picomatch from 'picomatch';
 import { describe, expect, it } from 'vitest';
 
@@ -10,6 +9,7 @@ import {
   splitPath,
   unsupportedSyntax,
 } from '../src/lib/glob.ts';
+import { CLASS_GLOBS } from '../src/lib/scoring/classes.ts';
 
 function matches(glob: string, path: string): boolean {
   const parts = splitPath(path);
@@ -18,7 +18,7 @@ function matches(glob: string, path: string): boolean {
 
 const PICO = { dot: true, windows: false, noextglob: true } as const;
 
-/** Realistic repository paths, plus the edge cases of every published class. */
+/** Realistic repository paths, plus the edge cases of every bundled class. */
 const CORPUS = [
   'README.md',
   'docs/architecture/overview.png',
@@ -37,7 +37,7 @@ const CORPUS = [
   'src/__snapshots__/a.test.ts.snap',
   'src/test.ts',
   'packages/db/src/schema.ts',
-  'packages/server/scripts/build.mjs',
+  'packages/api/scripts/build.mjs',
   'apps/web/tools/gen.ts',
   'apps/web/package-lock.json',
   'pnpm-lock.yaml',
@@ -104,9 +104,9 @@ const CORPUS = [
 ];
 
 describe('glob matcher against picomatch', () => {
-  it('classifies the corpus exactly like picomatch, for every published glob', () => {
+  it('classifies the corpus exactly like picomatch, for every bundled glob', () => {
     const differences: string[] = [];
-    for (const cls of PUBLISHED_CLASSES) {
+    for (const cls of CLASS_GLOBS) {
       for (const glob of cls.globs) {
         const reference = picomatch(glob, PICO);
         for (const path of CORPUS) {
@@ -213,9 +213,12 @@ describe('unsupportedSyntax', () => {
     expect(unsupportedSyntax('{a,\\*}')).toBeNull();
   });
 
-  it('accepts every published glob', () => {
-    for (const cls of PUBLISHED_CLASSES) {
-      for (const glob of cls.globs) expect(unsupportedSyntax(glob), glob).toBeNull();
+  it('accepts and compiles every bundled glob', () => {
+    for (const cls of CLASS_GLOBS) {
+      for (const glob of cls.globs) {
+        expect(unsupportedSyntax(glob), glob).toBeNull();
+        expect(compileGlob(glob).length, glob).toBeGreaterThan(0);
+      }
     }
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Options page: the token, the scope, the server, a few diagnostics and the activity log.
+ * Options page: the token, the scope, a few diagnostics and the activity log.
  */
 import {
   ActivityLog,
@@ -18,14 +18,7 @@ import {
 import { diagnose } from '../lib/diagnose.ts';
 import { clearPlacement, readPlacement } from '../lib/placement.ts';
 import type { Request, Response } from '../lib/messages.ts';
-import {
-  DEFAULT_SETTINGS,
-  isValidOrg,
-  normalizeServerUrl,
-  parseExcludeList,
-  serverUrlProblem,
-  type Settings,
-} from '../lib/settings.ts';
+import { DEFAULT_SETTINGS, isValidOrg, parseExcludeList, type Settings } from '../lib/settings.ts';
 import { Store, chromeStorageArea, type BadgeCache } from '../lib/storage.ts';
 import { localTime } from '../lib/time.ts';
 
@@ -49,7 +42,6 @@ const form = el('settings', HTMLFormElement);
 const tokenInput = el('token', HTMLInputElement);
 const orgInput = el('org', HTMLInputElement);
 const excludedInput = el('excluded', HTMLTextAreaElement);
-const serverUrlInput = el('server-url', HTMLInputElement);
 const status = el('status', HTMLParagraphElement);
 const buttons = {
   save: el('save', HTMLButtonElement),
@@ -80,7 +72,6 @@ function readForm(): Settings {
     token: tokenInput.value.trim(),
     org: orgInput.value.trim() || DEFAULT_SETTINGS.org,
     excludedRepos: parseExcludeList(excludedInput.value),
-    serverUrl: normalizeServerUrl(serverUrlInput.value),
   };
 }
 
@@ -88,7 +79,6 @@ function fillForm(settings: Settings): void {
   tokenInput.value = settings.token;
   orgInput.value = settings.org;
   excludedInput.value = settings.excludedRepos.join('\n');
-  serverUrlInput.value = settings.serverUrl;
   el('org-hint', HTMLElement).textContent = settings.org;
 }
 
@@ -265,9 +255,7 @@ function scheduleActivity(): void {
 
 /** Why the form cannot be used, or `null`. Save and Refresh both refuse invalid settings. */
 function formProblem(settings: Settings): string | null {
-  if (!isValidOrg(settings.org)) return `"${settings.org}" is not a GitHub organisation name.`;
-  const urlProblem = serverUrlProblem(settings.serverUrl);
-  return urlProblem ? `${urlProblem[0]?.toUpperCase() ?? ''}${urlProblem.slice(1)}.` : null;
+  return isValidOrg(settings.org) ? null : `"${settings.org}" is not a GitHub organisation name.`;
 }
 
 /** Saves valid settings, refreshes the badge with them, and reports the result. */

@@ -47,6 +47,11 @@ const chromeMock = {
 
 beforeAll(async () => {
   vi.stubGlobal('chrome', chromeMock);
+  // GitHub is offline: a refresh with a token fails on its first call.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.reject(new TypeError('Failed to fetch'))),
+  );
   await import('../src/background/index.ts');
 });
 
@@ -161,19 +166,19 @@ describe('background worker refresh queue', () => {
     const area = chromeMock.storage.local;
     await area.set({ badge: {}, settings: { token: '' } });
     const background = send({ type: 'badge:get' }, fromGitHub);
-    await area.set({ settings: { token: 'tok', serverUrl: 'http://127.0.0.1:1' } });
+    await area.set({ settings: { token: 'tok' } });
     const forced = await send({ type: 'badge:refresh' }, fromOptions);
     await background;
-    // With a token, the refresh got past the token check and failed on the unreachable server.
+    // With a token, the refresh got past the token check and failed on the unreachable GitHub API.
     expect(forced).toMatchObject({ type: 'badge:view', view: { stale: true } });
     const cache = await send({ type: 'cache:get' }, fromOptions);
-    expect(cache).toMatchObject({ type: 'cache', cache: { status: 'stale' } });
+    expect(cache).toMatchObject({ type: 'cache', cache: { status: 'github_error' } });
   });
 
   it('logs each refresh and each call it made, with the token kept out', async () => {
     await chromeMock.storage.local.set({
       badge: {},
-      settings: { token: 'github_pat_secret', serverUrl: 'http://127.0.0.1:1' },
+      settings: { token: 'github_pat_secret' },
     });
     await send({ type: 'badge:refresh' }, fromOptions);
     // The worker writes the log when the refresh ends.
@@ -184,7 +189,7 @@ describe('background worker refresh queue', () => {
     const last = lines.lastIndexOf('refresh started (asked by the options page)');
     expect(lines.slice(last)).toEqual([
       'refresh started (asked by the options page)',
-      'GET http://127.0.0.1:1/classes failed',
+      'GET https://api.github.com/user failed',
       expect.stringMatching(/^refresh failed: /),
     ]);
     const call = entries.find((e): e is CallEntry => e.kind === 'call');

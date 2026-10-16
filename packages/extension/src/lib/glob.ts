@@ -1,11 +1,10 @@
 /**
  * A glob matcher without regular expressions.
  *
- * The class globs come from the server. Compiled to regular expressions (picomatch), a crafted
- * glob backtracks for seconds per path. This matcher cannot: `*` and `?` match within a segment
- * with the linear-backtrack wildcard algorithm (O(text × pattern) at worst), and `**` spans
- * segments by dynamic programming over (pattern segment, path segment). Braces are expanded up
- * front, with a cap.
+ * Compiled to regular expressions (picomatch), a crafted glob backtracks for seconds per path.
+ * This matcher cannot: `*` and `?` match within a segment with the linear-backtrack wildcard
+ * algorithm (O(text × pattern) at worst), and `**` spans segments by dynamic programming over
+ * (pattern segment, path segment). Braces are expanded up front, with a cap.
  *
  * Supported syntax, with picomatch's meaning under `{ dot: true }`: `*`, `?`, `**` as a whole
  * segment (zero or more segments; a trailing `/**` right after a `*` needs at least one),

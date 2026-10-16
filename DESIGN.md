@@ -13,7 +13,7 @@ A badge in the github.com header that shows a developer how much they review com
 - **RP** means review points. Both sides use the same unit.
 - **↑** is RP given (reviews I did). **↓** is RP asked (my PRs in review). The tooltip says "given / asked".
 - The ratio is `↑ / ↓`.
-- The numbers are the server's weighted totals, not raw line counts.
+- The numbers are weighted totals computed by the extension, not raw line counts.
 
 | State | Display |
 | --- | --- |
@@ -22,8 +22,7 @@ A badge in the github.com header that shows a developer how much they review com
 | Ratio < 0.5 | amber. Never red: red reads as a sanction. |
 | ↓ = 0 | `Ratio ∞`, green |
 | ↑ = 0 and ↓ = 0 | `—`, grey. The badge stays visible. |
-| Server unreachable | last ratio, greyed, tooltip "stale since HH:MM" |
-| Server answers `426` | "update the extension", grey |
+| GitHub unreachable | last ratio, greyed, tooltip "stale since HH:MM" |
 
 - Refresh on page load, at most once every 10 minutes. The result is cached in `chrome.storage.local`.
 - Clicking the badge does nothing. The badge alone is the nudge.
@@ -48,12 +47,12 @@ Lines are bucketed by semantic class. The class never reveals the language.
 
 - `generated` covers lockfiles, generated schemas (`schema.ts`) and snapshots. These lines should still be read, but they carry less meaning.
 - Each class has a weight. The weights apply to **both sides**, so ↑ and ↓ stay in the same unit.
-- The server publishes the class globs. It never publishes the weights.
-- The extension matches file paths against the globs locally. Only the class name and a line count leave the browser.
+- The class globs are bundled in the extension and public, like the weights.
+- The extension matches file paths against the globs, then forgets the path. Only the class name and a line count are kept.
 
 ## Formula
 
-The formula and its parameters live on the server only. The extension never receives them.
+The formula and its parameters are bundled in the extension and public. The extension computes the badge in the browser, and its page **How Review Points are counted**, linked from the options page, renders every weight, threshold and glob from the constants the formula runs on.
 
 ### ↑ RP, per review I submit
 
@@ -111,25 +110,25 @@ The size malus applies to ↓ only. Mirroring it on ↑ would make large PRs att
 
 A plain approve on a PR under 400 weighted lines balances one PR under 400 weighted lines of my own, at the same age, at exactly ratio 1.0.
 
-Comments, Viewed and rescues push the ratio above 1.0. Large PRs of my own pull it below. The server tests this invariant for every contract major.
+Comments, Viewed and rescues push the ratio above 1.0. Large PRs of my own pull it below. A unit test checks this invariant through the whole local pipeline, rounding included.
 
 ## Architecture
 
 ```
 github.com page ──► extension (MV3) ──► GitHub API (dev's own token, read-only)
                          │
-                         │  anonymous numeric payload
                          ▼
-                    server (Hono) ── opaque formula ──► { up, down, ratio }
+              classify, round, score, all in the browser ──► { up, down, ratio }
 ```
 
 ### Extension (Chrome MV3)
 
 - Injects the badge into the github.com header.
 - Reads GitHub with the developer's own token: my reviews and their `commit_id`, review comments and their line ranges, the PR files between two commits (compare API), my own PRs, and `viewerViewedState` (GraphQL).
-- Classifies files locally with the server's globs.
-- Computes the per-review delta (`covered`) locally.
-- Builds the anonymous payload and posts it to the server. It resends the full 7-day window each time, so the server keeps nothing.
+- Classifies files with the bundled globs.
+- Computes the per-review delta (`covered`).
+- Builds the records and scores them. It rescores the full 7-day window each time.
+- Nothing leaves the browser except the GitHub API calls. There is no server.
 - Chrome only for v1. The same build runs in Edge, Brave and Arc.
 
 **Viewed capture.** On each refresh, for each review I made in the window whose PR head still equals the review's `commit_id`, the extension reads `viewerViewedState` and stores the snapshot against that review in `chrome.storage.local`.
@@ -138,54 +137,40 @@ github.com page ──► extension (MV3) ──► GitHub API (dev's own token,
 - This also covers reviews submitted outside the browser (`gh`, VS Code, mobile).
 - GitHub resets a file's Viewed flag when the file changes. If the author pushes before my next refresh, the snapshot is lost. That only costs the 0.2 bonus, never the base credit.
 
-### Payload
+### Records
 
-Numbers only. No login, no repo, no PR number, no path, no file extension, no code, no comment text.
+What the formula scores: numbers only, built from what was read and kept in memory for the refresh.
 
 ```
 ↑ record  { t, action, linesByClass, commentedLinesByClass, viewedLinesByClass, waitedHoursWithoutReview }
-↓ record  { prKey, readyAt, closedAt?, linesByClass }
+↓ record  { readyAt, linesByClass }
 ```
 
-- `t`, `readyAt`, `closedAt` are rounded to the hour.
+- `t` and `readyAt` are rounded to the hour.
 - Line counts are rounded to the nearest 10.
-- `waitedHoursWithoutReview` is rounded.
-- `prKey` is random. The extension generates and stores it. It is never derived from the repo or PR number.
-- Every payload carries `contractVersion`.
+- At most the newest 500 ↑ and 200 ↓ records count.
 
-### Server
+### Transparency
 
-- Stateless Hono app on Node. One endpoint: `POST /score` → `{ up, down, ratio }`.
-- Also serves the file-class globs (names and globs only).
-- Prototype: runs locally, started by hand with `pnpm dev:server` on a fixed localhost port. The extension declares that host permission.
-- Later: deployed remotely. The same Hono code runs on Cloud Run or Cloudflare Workers.
-
-### Opacity
-
-- The formula is computed on the server so developers cannot optimise against it.
-- MV3 forbids remotely hosted code, so the formula could not be shipped as code to the extension anyway.
-- Opacity is soft. A developer can read their own payload in DevTools and watch the ratio move.
-- The formula is readable by anyone with access to this repo. Opacity means it is not shipped to the extension and not shown on the badge.
+- The formula is public so a developer can see how their points are counted. A hidden formula asked for trust a private nudge does not need.
+- A developer can aim for the weights. The ratio is private, so gaming it only fools its owner, and the weights reward the review work the product wants anyway.
+- A formula change ships with an extension update. Every install scores with the formula it shipped with.
+- This replaces the opaque server formula of the first prototype (docs/decisions.md › Revised decisions).
 
 ## Code
 
-One pnpm monorepo, TypeScript throughout.
+One pnpm monorepo, TypeScript throughout. One package, `packages/extension`: the MV3 extension, with GitHub fetching, classification, scoring, the badge, and the scoring page.
 
-| Package | Content |
+| Path | Content |
 | --- | --- |
-| `contract` | ArkType payload schemas, one frozen schema per major (`payloadV1`, `payloadV2`…), fixture payloads per major |
-| `server` | Hono app, the formula, one decoder per supported contract major |
-| `extension` | MV3 extension: GitHub fetching, classification, payload building, badge |
-
-- The extension and the server import `contract` directly, so drift is a compile error.
-- Installed extensions keep running old builds, so the server keeps a decoder for each supported major.
-- Retiring a major is a deliberate server change. A retired major gets `426 Upgrade Required`.
+| `src/lib/scoring` | The formula, the bundled class globs, rounding, records |
+| `src/scoring` | The **How Review Points are counted** page, rendered from the formula's constants |
 
 **CI gates**
-- Decode and score the fixtures of every supported major against the current server.
-- Check the anchor invariant on every major.
-- Fail when a released major's schema is edited (frozen-schema check).
-- Typecheck all packages.
+- Score the fixtures against a snapshot, so a formula change shows in review.
+- Check the anchor invariant through the whole local pipeline.
+- Check that the scoring page shows the constants the formula runs on.
+- Typecheck, lint, unit and end-to-end tests.
 
 ## Auth
 
@@ -201,9 +186,7 @@ The scopes are the same in both phases. Only the auth module changes.
 - `dt-alexandre-weisser/review-ratio`, private, during the prototype.
 - Transferred to the `DiliTrust` org at rollout. GitHub keeps the history and redirects the old URL.
 
-## Open items (remote phase)
+## Open items
 
-- **Privacy.** A remote server sees client IPs. Payloads could be matched over time.
-- **Abuse.** Rate limiting for an anonymous endpoint.
 - **Rollout.** Org admin steps for the GitHub App and the repo transfer.
 - **Browsers.** Firefox (small manifest changes) and Safari (Xcode wrapper).

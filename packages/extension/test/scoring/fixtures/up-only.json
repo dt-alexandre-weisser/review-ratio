@@ -1,0 +1,17 @@
+{
+  "description": "Reviews given, nothing asked. The badge shows Ratio ∞ in green.",
+  "now": "2026-10-15T12:00:00Z",
+  "records": {
+    "up": [
+      {
+        "t": "2026-10-14T12:00:00Z",
+        "action": "approve",
+        "linesByClass": { "production": 250, "test": 120 },
+        "commentedLinesByClass": {},
+        "viewedLinesByClass": { "production": 250 },
+        "waitedHoursWithoutReview": 0
+      }
+    ],
+    "down": []
+  }
+}

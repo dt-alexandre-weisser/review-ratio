@@ -12,12 +12,7 @@
     "128": "icons/icon-128.png"
   },
   "permissions": ["storage", "scripting"],
-  "host_permissions": [
-    "https://api.github.com/*",
-    "https://github.com/*",
-    "http://localhost:8787/*",
-    "http://127.0.0.1:8787/*"
-  ],
+  "host_permissions": ["https://api.github.com/*", "https://github.com/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

@@ -60,16 +60,6 @@ export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
       tooltip: 'GitHub rejected the token. Check it in the extension options.',
     };
   }
-  if (cache.status === 'upgrade_required') {
-    return {
-      text: 'update the extension',
-      short: 'update',
-      parts: null,
-      tone: 'neutral',
-      stale: true,
-      tooltip: 'The review-ratio server no longer accepts this version. Update the extension.',
-    };
-  }
 
   const stale = isStale(cache, nowMs);
   const score = cache.score;

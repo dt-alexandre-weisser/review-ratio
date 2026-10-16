@@ -492,7 +492,7 @@ export function rowOf(entry: ActivityEntry): ActivityRow {
   };
 }
 
-/** `14 calls in the last 30 minutes: 12 to api.github.com, 2 to 127.0.0.1:8787.` */
+/** `14 calls in the last 30 minutes: 12 to api.github.com, 2 to github.com.` */
 export function summarize(entries: readonly ActivityEntry[]): string {
   const byHost = new Map<string, number>();
   let failures = 0;

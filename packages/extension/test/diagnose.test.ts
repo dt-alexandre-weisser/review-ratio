@@ -7,9 +7,7 @@ import { fakeFetch, json } from './helpers/fetch.ts';
 const settings = { ...DEFAULT_SETTINGS, token: 'tok' };
 const NOW = Date.parse('2026-10-15T12:00:00Z');
 
-function github(
-  overrides: { user?: Response; repos?: Response; search?: Response; health?: Response } = {},
-) {
+function github(overrides: { user?: Response; repos?: Response; search?: Response } = {}) {
   return fakeFetch((url) => {
     if (url.pathname === '/user') {
       return (
@@ -22,8 +20,6 @@ function github(
     }
     if (url.pathname === '/orgs/DiliTrust/repos') return overrides.repos ?? json([{ id: 1 }]);
     if (url.pathname === '/search/issues') return overrides.search ?? json({ total_count: 42 });
-    if (url.pathname === '/health')
-      return overrides.health ?? json({ ok: true, version: '0.1.0', contract: { supported: [1] } });
     return json({}, { status: 404 });
   });
 }
@@ -35,7 +31,9 @@ describe('diagnose', () => {
     expect(result.ok).toBe(true);
     expect(result.lines.join('\n')).toContain('token works for me, expires 2027-01-01');
     expect(result.lines.join('\n')).toContain('42 pull requests of DiliTrust');
-    expect(result.lines.join('\n')).toContain('is up (v0.1.0, contract 1)');
+    expect(new Set(fetchImpl.calls.map((c) => new URL(c.url).host))).toEqual(
+      new Set(['api.github.com']),
+    );
     const search = fetchImpl.calls.find((c) => c.url.includes('/search/issues'))!;
     expect(new URL(search.url).searchParams.get('q')).toBe(
       'is:pr org:DiliTrust updated:>=2026-10-08',
@@ -60,21 +58,9 @@ describe('diagnose', () => {
     ).toContain('token rejected (401)');
   });
 
-  it('flags a missing token, an unreachable server and a plain-http remote server', async () => {
+  it('flags a missing token', async () => {
     const noToken = await diagnose({ ...settings, token: '' }, github(), NOW);
-    expect(noToken.lines[0]).toContain('no token');
-    const healthy = github();
-    const down = await diagnose(
-      settings,
-      fakeFetch((url, init) => {
-        if (url.hostname === '127.0.0.1') throw new TypeError('Failed to fetch');
-        return healthy(url.toString(), init);
-      }),
-      NOW,
-    );
-    expect(down.ok).toBe(false);
-    expect(down.lines.join()).toContain('Server: unreachable');
-    const http = await diagnose({ ...settings, serverUrl: 'http://rr.example.com' }, github(), NOW);
-    expect(http.lines.join()).toContain('must use https');
+    expect(noToken.ok).toBe(false);
+    expect(noToken.lines).toEqual(['GitHub: no token yet.']);
   });
 });

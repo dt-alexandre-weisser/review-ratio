@@ -1,20 +1,18 @@
 /**
- * Local file classification against the server's published globs. Only the class name and a line
- * count ever leave the browser; the path is matched here and forgotten.
+ * File classification against the bundled class globs (scoring/classes.ts). The path is matched
+ * here and forgotten: only the class name and a line count are kept.
  */
-import type { FileClass, LinesByClassV1 } from '@review-ratio/contract';
-
 import { compileGlob, matchPattern, splitPath } from './glob.ts';
-import type { PublishedClass } from './storage.ts';
+import type { ClassGlobs, FileClass, LinesByClass } from './scoring/classes.ts';
 
 export type Classifier = (path: string) => FileClass;
 
-/** A refresh spends at most this much time classifying paths, whatever globs the server sent. */
+/** A refresh spends at most this much time classifying paths, so a huge PR cannot hang it. */
 export const CLASSIFICATION_BUDGET_MS = 5_000;
 
 export class ClassificationBudgetError extends Error {
   constructor() {
-    super("classifying files took too long: the server's class globs are too expensive");
+    super('classifying files took too long');
     this.name = 'ClassificationBudgetError';
   }
 }
@@ -30,7 +28,7 @@ export interface ClassifierOptions {
  * (see glob.ts). Each path is classified once per classifier, and the total time is bounded.
  */
 export function createClassifier(
-  classes: readonly PublishedClass[],
+  classes: readonly ClassGlobs[],
   options: ClassifierOptions = {},
 ): Classifier {
   const budgetMs = options.budgetMs ?? CLASSIFICATION_BUDGET_MS;
@@ -74,8 +72,8 @@ export interface FileLines {
 }
 
 /** Sums lines per class. Classes with 0 lines are omitted. */
-export function linesByClass(files: Iterable<FileLines>, classify: Classifier): LinesByClassV1 {
-  const totals: Partial<Record<FileClass, number>> = {};
+export function linesByClass(files: Iterable<FileLines>, classify: Classifier): LinesByClass {
+  const totals: LinesByClass = {};
   for (const file of files) {
     if (file.lines <= 0) continue;
     const cls = classify(file.path);

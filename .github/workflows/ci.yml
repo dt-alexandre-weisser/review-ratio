@@ -35,20 +35,7 @@ jobs:
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
-      - name: Contract pins match the files
-        run: node packages/contract/scripts/freeze.mjs
-      - name: No released contract major changed against main
-        run: |
-          base="$RUNNER_TEMP/base-frozen.json"
-          # A failed fetch fails the step; only a main without frozen.json yet compares with {}.
-          git fetch --no-tags --depth=1 origin main
-          if git cat-file -e origin/main:packages/contract/frozen.json; then
-            git show origin/main:packages/contract/frozen.json > "$base"
-          else
-            echo '{}' > "$base"
-          fi
-          node packages/contract/scripts/freeze.mjs --against "$base"
-      - name: Unit tests, contract gates (fixtures and anchor invariant per major), coverage
+      - name: Unit tests, formula gates (fixtures and anchor invariant), coverage
         run: pnpm test:coverage
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -59,7 +46,7 @@ jobs:
           if-no-files-found: ignore
 
   build:
-    name: Build extension and server
+    name: Build extension
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -76,13 +63,6 @@ jobs:
         with:
           name: review-ratio-extension-${{ github.sha }}
           path: packages/extension/dist/
-          retention-days: 30
-          if-no-files-found: error
-      - name: Upload the server bundles
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: review-ratio-server-${{ github.sha }}
-          path: packages/server/dist/
           retention-days: 30
           if-no-files-found: error
 
@@ -108,37 +88,3 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 14
-
-  docker:
-    name: Server image
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: packages/server/Dockerfile
-          tags: review-ratio-server:ci
-          load: true
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Smoke test the image
-        run: |
-          # Fails fast without an explicit proxy setting.
-          if docker run --rm review-ratio-server:ci; then echo 'started without TRUSTED_PROXY_HOPS' >&2; exit 1; fi
-          docker run -d --name rr -p 8080:8080 -e TRUSTED_PROXY_HOPS=0 review-ratio-server:ci
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/health; then break; fi
-            sleep 1
-          done
-          body='{"contractVersion":1,"up":[],"down":[]}'
-          curl -fsS -X POST http://127.0.0.1:8080/score -H 'content-type: application/json' -d "$body" | tee /dev/stderr | grep -q '"ratio":null'
-          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/score -H 'content-type: text/plain' -d "$body")" = 415
-          test "$(docker exec rr id -u)" != "0"
-          docker exec rr sh -c '! command -v npm && ! command -v apk'
-      - name: Container logs
-        if: always()
-        run: docker logs rr || true

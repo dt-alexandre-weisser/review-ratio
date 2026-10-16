@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { PUBLISHED_CLASSES } from '@review-ratio/server';
 import { ClassificationBudgetError, createClassifier, linesByClass } from '../src/lib/classify.ts';
+import { CLASS_GLOBS } from '../src/lib/scoring/classes.ts';
 
-const classify = createClassifier(
-  PUBLISHED_CLASSES.map((c) => ({ name: c.name, globs: [...c.globs] })),
-);
+const classify = createClassifier(CLASS_GLOBS);
 
-describe('createClassifier with the published globs', () => {
+describe('createClassifier with the bundled globs', () => {
   it.each([
     ['src/app/service.ts', 'production'],
     ['Api/Controllers/UserController.cs', 'production'],
@@ -41,7 +39,7 @@ describe('createClassifier with the published globs', () => {
     ['src/latest.ts', 'production'],
     ['src/agent/tools/search.ts', 'production'],
     ['src/app/scripts/main.ts', 'production'],
-    ['packages/server/scripts/build.mjs', 'tooling'],
+    ['packages/api/scripts/build.mjs', 'tooling'],
     ['tools/gen.py', 'tooling'],
     ['src/components/ABTest.tsx', 'production'],
     ['src/test/java/com/acme/FooTest.java', 'test'],
@@ -80,7 +78,7 @@ describe('createClassifier with the published globs', () => {
     expect(createClassifier([])('anything.xyz')).toBe('production');
   });
 
-  it('takes the first matching class in published order', () => {
+  it('takes the first matching class in bundled order', () => {
     const custom = createClassifier([
       { name: 'test', globs: ['**/*.ts'] },
       { name: 'docs', globs: ['**/*.ts'] },
@@ -130,7 +128,7 @@ describe('classification budget', () => {
     expect(calls).toBe(before);
   });
 
-  it('classifies a thousand paths quickly with the published globs, even instrumented', () => {
+  it('classifies a thousand paths quickly with the bundled globs, even instrumented', () => {
     const paths = Array.from(
       { length: 1000 },
       (_, i) => `packages/p${i % 50}/src/module${i}/file${i}.ts`,

@@ -56,7 +56,6 @@ export function downRecordForPullRequest(
   return {
     prKey: ctx.prKeyOf(pr.owner, pr.repo, pr.number),
     readyAtMs,
-    closedAtMs: pr.closedAt === null ? null : parseIso(pr.closedAt),
     linesByClass: linesByClass(
       pr.files.map((f) => ({ path: f.path, lines: f.additions + f.deletions })),
       ctx.classify,
