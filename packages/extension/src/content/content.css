@@ -44,11 +44,18 @@
   }
 }
 
-/* GitHub's narrow header has no room left; a floating badge stays. */
-@media (max-width: 767px) {
-  .review-ratio-badge[data-placement='header'] {
-    display: none;
-  }
+/* ↑ and ↓ take GitHub's colours for added and removed lines, which follow the user's theme
+   (colour-blind themes included), like the +/- counts of a pull request. */
+.review-ratio-up {
+  color: var(--fgColor-success, var(--color-success-fg, #1a7f37));
+}
+
+.review-ratio-down {
+  color: var(--fgColor-danger, var(--color-danger-fg, #d1242f));
+}
+
+.review-ratio-sep {
+  color: var(--fgColor-muted, var(--color-fg-muted, #59636e));
 }
 
 /* GitHub's header was not found: bottom-right corner, above the page. */

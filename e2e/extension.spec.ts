@@ -58,6 +58,20 @@ test('shows the ratio in the GitHub header and sends numbers only', async ({
   await expect(badge).toHaveAttribute('data-stale', 'false');
   await expect(badge).toHaveAttribute('data-placement', 'header');
   await expect(badge).toHaveAttribute('title', /given \/ asked/);
+  // Just left of the search bar, in the header's own row.
+  await expect(
+    github.locator('.AppHeader-globalBar-end > #review-ratio-badge + .AppHeader-search'),
+  ).toHaveCount(1);
+  // ↑ and ↓ in GitHub's colours for added and removed lines, from the theme when it sets them.
+  const up = badge.locator('.review-ratio-up');
+  const down = badge.locator('.review-ratio-down');
+  await expect(up).toHaveCSS('color', 'rgb(26, 127, 55)');
+  await expect(down).toHaveCSS('color', 'rgb(209, 36, 47)');
+  await github.addStyleTag({
+    content: ':root { --fgColor-success: rgb(9, 105, 218); --fgColor-danger: rgb(188, 76, 0); }',
+  });
+  await expect(up).toHaveCSS('color', 'rgb(9, 105, 218)');
+  await expect(down).toHaveCSS('color', 'rgb(188, 76, 0)');
 
   // The pinned manifest key gives every install the same id: it says nothing about the machine.
   expect(extensionId).toBe('bhmdipijifghpkibegnfchgcafodlgnb');
@@ -212,11 +226,37 @@ test('lists the calls of the last 30 minutes on the options page', async ({
   await expect(rows.locator('tr')).toHaveCount(0);
 });
 
-test('floats the badge when the GitHub header is not recognised, and says so', async ({
+test('finds the search bar of a redesigned header, and stays visible in a narrow window', async ({
   context,
   extensionId,
 }) => {
-  await installFakeGitHub(context, { unknownHeader: true });
+  await installFakeGitHub(context, { header: 'redesigned' });
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+
+  const github = await context.newPage();
+  await github.setViewportSize({ width: 700, height: 600 });
+  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  const badge = github.locator('#review-ratio-badge');
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute('data-placement', 'header');
+  await expect(
+    github.locator('.Nav2026-row > #review-ratio-badge + .Nav2026-searchWrap'),
+  ).toHaveCount(1);
+  // Narrow: the short form.
+  await expect(badge.locator('.review-ratio-short')).toBeVisible();
+  await expect(badge.locator('.review-ratio-short')).toHaveText('Ratio 1.00');
+
+  await options.bringToFront();
+  await expect(options.locator('#diag-placement')).toContainText('in the GitHub header');
+  await expect(options.locator('#diag-header-wrap')).toBeHidden();
+});
+
+test('floats the badge when the GitHub header has no place for it, and says so', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context, { header: 'unknown' });
   const options = await context.newPage();
   await configure(options, extensionId, { token: 'github_pat_e2e' });
 
@@ -233,14 +273,30 @@ test('floats the badge when the GitHub header is not recognised, and says so', a
 
   await options.bringToFront();
   await expect(options.locator('#diag-placement')).toContainText(
-    "bottom-right corner: GitHub's header was not found",
+    "bottom-right corner: no place found in GitHub's header",
   );
   await expect(options.locator('#diag-header-wrap')).toBeVisible();
   await options.locator('#diag-header-wrap summary').click();
   await expect(options.locator('#diag-header')).toHaveText(
-    ['header.GlobalNav', '  div.GlobalNav-end', '    a'].join('\n'),
+    [
+      'search path: no search control found',
+      'header:',
+      '  header.GlobalNav',
+      '    div.GlobalNav-end',
+      '      a',
+    ].join('\n'),
   );
   await expect(options.locator('#activity-rows')).toContainText(
-    "badge shown in the bottom-right corner: GitHub's header was not found",
+    "badge shown in the bottom-right corner: no place found in GitHub's header",
   );
+});
+
+test('shows no floating badge on signed-out pages', async ({ context, extensionId }) => {
+  await installFakeGitHub(context, { header: 'unknown', signedOut: true });
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+  const github = await context.newPage();
+  await github.goto('https://github.com/login');
+  await github.waitForTimeout(4_000);
+  await expect(github.locator('#review-ratio-badge')).toHaveCount(0);
 });

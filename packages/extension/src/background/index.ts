@@ -50,6 +50,7 @@ const deps: RefreshDeps = {
  * at most one waits in the queue. The storage lock covers worker restarts.
  */
 let queue: Promise<void> = Promise.resolve();
+let placements: Promise<void> = Promise.resolve();
 let backgroundQueued = false;
 
 function enqueue(task: () => Promise<unknown>): Promise<void> {
@@ -120,14 +121,18 @@ async function handle(request: Request): Promise<Response> {
     }
     case 'cache:get':
       return { type: 'cache', cache: await store.getBadge() };
-    case 'badge:placed':
-      await recordPlacement(session, activity, {
-        placement: request.placement,
-        header: request.header,
-        at: Date.now(),
-      });
+    case 'badge:placed': {
+      const report = { placement: request.placement, header: request.header, at: Date.now() };
+      // One at a time: a report reads the previous one before writing.
+      placements = placements
+        .then(() => recordPlacement(session, activity, report))
+        .catch((error: unknown) => {
+          console.warn('[review-ratio] cannot record the badge placement', error);
+        });
+      await placements;
       await activity.flush();
       return { type: 'ok' };
+    }
   }
 }
 

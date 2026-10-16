@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ActivityLog, readActivity } from '../src/lib/activity-log.ts';
 import {
+  LOG_EVERY_MS,
   clearPlacement,
   describePlacement,
   readPlacement,
@@ -15,10 +16,16 @@ function setup() {
   const log = new ActivityLog(area, { now: () => NOW });
   const events = async () => {
     await log.flush();
-    return (await readActivity(area, NOW)).map((e) => (e.kind === 'event' ? e.message : ''));
+    return (await readActivity(area, NOW + LOG_WINDOW))
+      .map((e) => (e.kind === 'event' ? e.message : ''))
+      .reverse();
   };
   return { area, log, events };
 }
+const LOG_WINDOW = 60_000;
+
+const FLOATING = describePlacement('floating');
+const HEADER = describePlacement('header');
 
 describe('badge placement', () => {
   it('is unknown until a page reports it', async () => {
@@ -26,36 +33,53 @@ describe('badge placement', () => {
     expect(await readPlacement(area)).toBeNull();
   });
 
-  it('stores the latest report and logs each change once', async () => {
-    const { area, log, events } = setup();
-    const floating = { placement: 'floating' as const, header: 'header.New', at: NOW };
+  it('keeps the latest report, and the last floating one apart', async () => {
+    const { area, log } = setup();
+    const floating = { placement: 'floating' as const, header: 'header:\n  header', at: NOW };
     await recordPlacement(area, log, floating);
-    await recordPlacement(area, log, { ...floating, at: NOW + 1 });
-    expect(await readPlacement(area)).toEqual({ ...floating, at: NOW + 1 });
-    expect(await events()).toEqual([describePlacement('floating')]);
+    const inHeader = { placement: 'header' as const, header: '', at: NOW + 1 };
+    await recordPlacement(area, log, inHeader);
+    expect(await readPlacement(area)).toMatchObject({ latest: inHeader, lastFloating: floating });
+  });
 
-    await recordPlacement(area, log, { ...floating, header: 'header.Newer', at: NOW + 2 });
-    await recordPlacement(area, log, { placement: 'header', header: '', at: NOW + 3 });
-    expect(await events()).toEqual([
-      'badge shown in the GitHub header',
-      "badge shown in the bottom-right corner: GitHub's header was not found",
-      "badge shown in the bottom-right corner: GitHub's header was not found",
-    ]);
+  it('logs a change of placement once, at most once per interval', async () => {
+    const { area, log, events } = setup();
+    const at = (ms: number) => NOW + ms;
+    await recordPlacement(area, log, { placement: 'floating', header: 'a', at: at(0) });
+    await recordPlacement(area, log, { placement: 'floating', header: 'a', at: at(1) });
+    // A change within the interval is stored but not logged.
+    await recordPlacement(area, log, { placement: 'header', header: '', at: at(2) });
+    expect((await readPlacement(area))?.latest.placement).toBe('header');
+    await recordPlacement(area, log, { placement: 'floating', header: 'a', at: at(LOG_EVERY_MS) });
+    await recordPlacement(area, log, {
+      placement: 'floating',
+      header: 'b',
+      at: at(2 * LOG_EVERY_MS),
+    });
+    await recordPlacement(area, log, { placement: 'header', header: '', at: at(3 * LOG_EVERY_MS) });
+    await recordPlacement(area, log, { placement: 'header', header: '', at: at(4 * LOG_EVERY_MS) });
+    expect(await events()).toEqual([FLOATING, FLOATING, FLOATING, HEADER]);
   });
 
   it('ignores a malformed stored value, and clears', async () => {
     const { area } = setup();
     for (const bad of [
       'header',
-      { placement: 'sidebar', header: '', at: NOW },
-      { placement: 'header', header: 1, at: NOW },
-      { placement: 'header', header: '', at: 'now' },
+      { latest: 'header' },
+      { latest: { placement: 'sidebar', header: '', at: NOW } },
+      { latest: { placement: 'header', header: 1, at: NOW } },
+      { latest: { placement: 'header', header: '', at: 'now' } },
     ]) {
       area.data['badgePlacement'] = bad;
       expect(await readPlacement(area)).toBeNull();
     }
-    area.data['badgePlacement'] = { placement: 'floating', header: 'x'.repeat(5000), at: NOW };
-    expect((await readPlacement(area))?.header).toHaveLength(2000);
+    area.data['badgePlacement'] = {
+      latest: { placement: 'floating', header: 'x'.repeat(5000), at: NOW },
+      lastFloating: 'bad',
+      loggedAt: 'bad',
+    };
+    expect(await readPlacement(area)).toMatchObject({ lastFloating: null, loggedAt: null });
+    expect((await readPlacement(area))?.latest.header).toHaveLength(2000);
     await clearPlacement(area);
     expect(area.data['badgePlacement']).toBeUndefined();
   });

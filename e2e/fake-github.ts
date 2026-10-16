@@ -86,20 +86,46 @@ function json(route: Route, body: unknown, status = 200) {
 export interface FakeGitHubOptions {
   /** Answer 401 to every API call. */
   rejectToken?: boolean;
-  /** Serve pages whose header has none of the containers the badge knows, as after a redesign. */
-  unknownHeader?: boolean;
+  /**
+   * The header of the pages: GitHub's AppHeader (default), a redesign with unknown classes but a
+   * search button, or one with neither.
+   */
+  header?: 'app' | 'redesigned' | 'unknown';
+  /** Serve pages without GitHub's signed-in signals. */
+  signedOut?: boolean;
 }
 
-const APP_HEADER = `<header class="AppHeader"><div class="AppHeader-globalBar"><div class="AppHeader-globalBar-end"><button>bell</button></div></div></header>`;
-const UNKNOWN_HEADER = `<header class="GlobalNav" role="banner"><div class="GlobalNav-end"><a href="/notifications">bell</a></div></header>`;
+const ROW = 'display:flex;align-items:center;gap:8px';
+const HEADERS = {
+  app: `<header class="AppHeader" role="banner">
+    <div class="AppHeader-globalBar" style="${ROW};justify-content:space-between;padding:12px">
+      <div class="AppHeader-globalBar-start" style="${ROW}"><a href="/">logo</a><span class="AppHeader-context-full">DiliTrust / top-secret-repo</span></div>
+      <div class="AppHeader-globalBar-end" style="${ROW}">
+        <div class="AppHeader-search"><qbsearch-input><button class="header-search-button" aria-label="Search or jump to…">Type / to search</button></qbsearch-input></div>
+        <div class="AppHeader-actions" style="${ROW}"><button>+</button><a href="/pulls">PRs</a></div>
+        <a href="/notifications">inbox</a>
+      </div>
+    </div>
+  </header>`,
+  redesigned: `<header class="Nav2026" role="banner">
+    <div class="Nav2026-row" style="${ROW};padding:12px">
+      <a href="/">logo</a>
+      <span class="Nav2026-searchWrap"><button aria-label="Search or jump to…">Type / to search</button></span>
+      <button aria-label="Open Copilot">copilot</button>
+    </div>
+  </header>`,
+  unknown: `<header class="GlobalNav" role="banner"><div class="GlobalNav-end" style="${ROW}"><a href="/notifications">bell</a></div></header>`,
+};
 
 export async function installFakeGitHub(context: BrowserContext, options: FakeGitHubOptions = {}) {
   await context.route('https://github.com/**', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'text/html',
-      body: `<!doctype html><html><head><title>GitHub</title></head><body>
-        ${options.unknownHeader ? UNKNOWN_HEADER : APP_HEADER}
+      body: `<!doctype html><html><head><title>GitHub</title>
+        ${options.signedOut ? '' : `<meta name="user-login" content="${ME}">`}
+        </head><body class="${options.signedOut ? 'logged-out' : 'logged-in'}">
+        ${HEADERS[options.header ?? 'app']}
         <main><h1>Fake GitHub</h1></main></body></html>`,
     }),
   );

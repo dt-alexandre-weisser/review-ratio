@@ -66,7 +66,7 @@ The token stays in `chrome.storage.local` and is only sent to `api.github.com`.
 
 | State                        | Badge                                          |
 | ---------------------------- | ---------------------------------------------- |
-| Ratio ≥ 1.0                  | green                                          |
+| Ratio ≥ 1.0                  | green ratio                                    |
 | 0.5 ≤ ratio < 1.0            | grey                                           |
 | Ratio < 0.5                  | amber, never red                               |
 | Nothing asked                | `Ratio ∞`, green                               |
@@ -80,14 +80,15 @@ options page has **Refresh badge now** and shows the last score and error.
 
 ### Where the badge is
 
-In the top bar of github.com, on the right, first in the group of search box and icons. At a
-window width of 1,280 px or less it shortens to `Ratio 1.49`, and below 768 px it hides, as
-GitHub's header has no room left.
+In the github.com header, just left of the search bar, in the header's own row: it moves with
+GitHub's layout. At a window width of 1,280 px or less it shortens to `Ratio 1.49`. ↑ takes the
+colour GitHub gives added lines and ↓ the colour of removed lines, from your theme, so colour-blind
+themes apply. The ratio is green, grey or amber. Signed-out pages show no badge.
 
-GitHub changes its header markup without notice. When the badge cannot find its place in the
-header, it floats in the bottom-right corner of the page instead of disappearing. The options
-page then says so under **On github.com**, and shows the structure of the header it saw (tags and
-classes only) to send to the maintainers, so the badge can go back in the header.
+GitHub changes its header without notice. The badge checks that it actually shows where it is
+placed. When the header has no place for it, it floats in the bottom-right corner instead of
+disappearing, and the options page says so under **On github.com**, with what it saw of the header
+(tags, classes and layout only) to send to the maintainers.
 
 ### Activity log
 

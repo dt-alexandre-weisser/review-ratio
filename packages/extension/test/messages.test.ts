@@ -11,9 +11,16 @@ describe('message guards', () => {
     expect(isRequest({ type: 'cache:get' })).toBe(true);
     expect(isRequest({ type: 'settings:steal' })).toBe(false);
     expect(isRequest({ type: 'badge:placed', placement: 'header', header: '' })).toBe(true);
-    expect(isRequest({ type: 'badge:placed', placement: 'floating', header: 'header.x' })).toBe(
-      true,
-    );
+    expect(
+      isRequest({
+        type: 'badge:placed',
+        placement: 'floating',
+        header: 'search path:\n  div#a_b.c-d [inline-flex]\nheader:\n  header.x',
+      }),
+    ).toBe(true);
+    for (const header of ['<img src=x>', 'a "quote"', "it's", 'visit https://x']) {
+      expect(isRequest({ type: 'badge:placed', placement: 'floating', header })).toBe(false);
+    }
     expect(isRequest({ type: 'badge:placed', placement: 'sidebar', header: '' })).toBe(false);
     expect(isRequest({ type: 'badge:placed', placement: 'header' })).toBe(false);
     expect(

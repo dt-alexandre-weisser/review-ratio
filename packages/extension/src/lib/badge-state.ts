@@ -11,6 +11,11 @@ export interface BadgeView {
   text: string;
   /** Short text for narrow headers, e.g. `Ratio 1.49`. */
   short: string;
+  /**
+   * The three parts of `text` when it shows a score, coloured apart: ↑ like GitHub's added lines,
+   * ↓ like its removed lines, the ratio by tone.
+   */
+  parts: { up: string; down: string; ratio: string } | null;
   tone: Tone;
   /** Greyed out: the numbers are old or there are none. */
   stale: boolean;
@@ -39,6 +44,7 @@ export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
     return {
       text: 'review-ratio: set up',
       short: 'set up',
+      parts: null,
       tone: 'neutral',
       stale: true,
       tooltip: 'review-ratio needs a GitHub token. Open the extension options.',
@@ -48,6 +54,7 @@ export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
     return {
       text: 'review-ratio: token rejected',
       short: 'token?',
+      parts: null,
       tone: 'neutral',
       stale: true,
       tooltip: 'GitHub rejected the token. Check it in the extension options.',
@@ -57,6 +64,7 @@ export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
     return {
       text: 'update the extension',
       short: 'update',
+      parts: null,
       tone: 'neutral',
       stale: true,
       tooltip: 'The review-ratio server no longer accepts this version. Update the extension.',
@@ -69,6 +77,7 @@ export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
     return {
       text: '↑ — · ↓ — | Ratio —',
       short: 'Ratio —',
+      parts: { up: '↑ —', down: '↓ —', ratio: 'Ratio —' },
       tone: 'neutral',
       stale: true,
       tooltip: stale
@@ -91,11 +100,23 @@ export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
     tone = toneOf(ratio, up);
   }
 
-  const text = `↑ ${formatRp(up)} · ↓ ${formatRp(down)} | Ratio ${ratioText}`;
+  const parts = {
+    up: `↑ ${formatRp(up)}`,
+    down: `↓ ${formatRp(down)}`,
+    ratio: `Ratio ${ratioText}`,
+  };
+  const text = `${parts.up} · ${parts.down} | ${parts.ratio}`;
   const tooltip = stale
     ? `stale since ${cache.scoredAt === null ? '?' : localClock(cache.scoredAt)}`
     : `review-ratio (${GIVEN_ASKED}), last 7 days`;
-  return { text, short: `Ratio ${ratioText}`, tone: stale ? 'neutral' : tone, stale, tooltip };
+  return {
+    text,
+    short: parts.ratio,
+    parts,
+    tone: stale ? 'neutral' : tone,
+    stale,
+    tooltip,
+  };
 }
 
 /**

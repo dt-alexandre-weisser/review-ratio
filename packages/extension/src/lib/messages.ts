@@ -6,6 +6,11 @@ export type Placement = 'header' | 'floating';
 
 /** Longest header description a content script may report. */
 export const MAX_HEADER_TEXT = 2_000;
+/**
+ * What a header description is made of: tag names, ids and classes (with other characters
+ * replaced), display values, indentation and the two section titles. No quotes or angle brackets.
+ */
+const HEADER_TEXT = /^[\w .#:[\]\n-]*$/;
 
 /** Messages between the content script, the options page and the background worker. */
 export type Request =
@@ -37,7 +42,8 @@ export function isRequest(value: unknown): value is Request {
     return (
       (v.placement === 'header' || v.placement === 'floating') &&
       typeof v.header === 'string' &&
-      v.header.length <= MAX_HEADER_TEXT
+      v.header.length <= MAX_HEADER_TEXT &&
+      HEADER_TEXT.test(v.header)
     );
   }
   return v.type === 'badge:get' || v.type === 'badge:refresh' || v.type === 'cache:get';

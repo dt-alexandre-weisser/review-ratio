@@ -33,10 +33,11 @@ does without DevTools.
   so, and repeats it after **Copy as text**.
 - Never holds a header or a body, so never the token or the payload.
 - Cleared by **Forget local activity data**. Nothing in it leaves the browser.
-- Next to it, the worker keeps where the badge last went on github.com and, when it floats, the
-  header structure the content script saw: tag names, ids and classes, never page text or links.
-  A content script may send only that report and the request for the badge; the worker checks
-  its shape and size.
+- Next to it, the worker keeps where the badge last went on github.com and, when it floats, what
+  the content script saw of the header: tag names, ids, classes and layout, never page text or
+  links. A content script may send only that report and the request for the badge. The worker
+  accepts a report of at most 2,000 characters made of letters, digits and `_ - . # : [ ]`, so
+  no markup, quotes or links, and logs at most one placement line every 10 seconds.
 
 ## What leaves the browser
 

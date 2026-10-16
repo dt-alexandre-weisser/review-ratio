@@ -187,15 +187,25 @@ question below.
 
 ### Badge placement
 
-- The badge goes first in `.AppHeader-globalBar-end`, else in `.AppHeader-actions`, skipping a
-  container GitHub hides. It never goes in a bare `header`, which could be page content.
-- When neither is on the page 3 seconds after the content script starts, the badge floats in the
-  bottom-right corner rather than staying invisible. It moves into the header as soon as one
-  shows up, on GitHub's soft navigation or the 5-second remount check.
-- The content script reports each change of placement to the worker. When the badge floats, it
-  also sends the header's structure: tag names, ids and the first four classes of up to 40 nodes,
-  no text and no links, at most 2,000 characters. The options page shows it, and the activity log
-  records the change.
+- The badge goes just left of the header's search bar: before the search's item in the nearest
+  flex row above it. The search is found by GitHub's markup (`.AppHeader-search`,
+  `qbsearch-input`…) or, after a redesign, by a header control whose label says "search". Then
+  `.AppHeader-globalBar-end` and `.AppHeader-actions`, first position. Never a bare `header` inside
+  the page content.
+- Each place is checked after the badge is put there: visible through `display`, `visibility` and
+  `opacity`, not empty, not clipped out of its container. A place that fails is not tried again
+  on that page. Nothing hides the badge at narrow widths; it shortens to the ratio instead.
+- When no place works 3 seconds after the page loads or GitHub navigates, the badge floats in the
+  bottom-right corner, on signed-in pages only (`meta[name="user-login"]` or `body.logged-in`,
+  GitHub's own signals). It moves into the header as soon as a place appears.
+- ↑ and ↓ use `--fgColor-success` and `--fgColor-danger`, the colours of GitHub's added and removed
+  line counts, which follow the user's theme, colour-blind themes included.
+- The content script reports each change of placement. When the badge floats it also sends what
+  it saw: the path from the search control up to the header with each level's `display`, and the
+  header's tree (tags, ids, first four classes, 80 nodes, no SVG internals, no text, no links,
+  2,000 characters). The worker accepts only that alphabet. It keeps the latest report and the
+  last floating one apart, writes them one at a time, and logs at most one placement line every
+  10 seconds.
 
 ### Badge states
 

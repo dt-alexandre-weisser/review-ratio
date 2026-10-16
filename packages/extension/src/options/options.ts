@@ -96,21 +96,34 @@ function describeCache(cache: BadgeCache): void {
   el('diag-error', HTMLElement).textContent = cache.error ?? '—';
 }
 
+const GITHUB_PAGES = { origins: ['https://github.com/*'] };
+
 async function showPlacement(): Promise<void> {
-  const report = await readPlacement(sessionArea);
+  const state = await readPlacement(sessionArea);
   const where = el('diag-placement', HTMLElement);
   const details = el('diag-header-wrap', HTMLDetailsElement);
-  if (!report) {
+  // Site access set to "on click", or an enterprise policy, keeps the badge off github.com.
+  const allowed = await chrome.permissions.contains(GITHUB_PAGES);
+  if (!allowed) {
+    where.textContent =
+      'Chrome does not let the extension run on github.com. In chrome://extensions, open Details and set Site access to allow github.com.';
+  } else if (!state) {
     where.textContent = 'no badge yet: open or reload a github.com page';
-    details.hidden = true;
-    return;
+  } else {
+    const { placement, at } = state.latest;
+    where.textContent =
+      placement === 'header'
+        ? `in the GitHub header (${localTime(at)})`
+        : `bottom-right corner: no place found in GitHub's header (${localTime(at)})`;
   }
-  where.textContent =
-    report.placement === 'header'
-      ? `in the GitHub header (${localTime(report.at)})`
-      : `bottom-right corner: GitHub's header was not found (${localTime(report.at)})`;
-  details.hidden = report.placement !== 'floating';
-  el('diag-header', HTMLPreElement).textContent = report.header;
+  const floating = state?.lastFloating ?? null;
+  details.hidden = floating === null;
+  if (floating) {
+    el('diag-header-summary', HTMLElement).textContent =
+      `What the badge saw of GitHub's header when it last floated (${localTime(floating.at)})`;
+    el('diag-header', HTMLPreElement).textContent =
+      floating.header || 'no <header> element on the page';
+  }
 }
 
 async function showDiagnostics(): Promise<void> {

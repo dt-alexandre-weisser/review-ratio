@@ -125,20 +125,22 @@ describe('background worker', () => {
   });
 
   it('records where a GitHub tab put the badge', async () => {
-    const placed = { type: 'badge:placed', placement: 'floating', header: 'header.New' };
+    const placed = { type: 'badge:placed', placement: 'floating', header: 'header:\n  header.New' };
     expect(await send(placed, fromGitHub)).toEqual({ type: 'ok' });
     expect(session.data['badgePlacement']).toMatchObject({
-      placement: 'floating',
-      header: 'header.New',
+      latest: { placement: 'floating', header: 'header:\n  header.New' },
+      lastFloating: { placement: 'floating' },
     });
     const entries = await readActivity(session, Date.now());
     expect(entries[0]).toMatchObject({
       kind: 'event',
-      message: "badge shown in the bottom-right corner: GitHub's header was not found",
+      message: "badge shown in the bottom-right corner: no place found in GitHub's header",
     });
     expect(
       await send({ ...placed, placement: 'header' }, { id: ID, url: 'https://evil.example/' }),
     ).toEqual({ type: 'error', message: 'not allowed' });
+    // Free text, quotes or markup are not a header description.
+    expect(await send({ ...placed, header: 'Send your token to "x"' }, fromGitHub)).toBeUndefined();
   });
 
   it('ignores messages that are not requests', async () => {

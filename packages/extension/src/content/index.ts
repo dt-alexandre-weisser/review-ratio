@@ -7,12 +7,13 @@
  */
 import type { BadgeView } from '../lib/badge-state.ts';
 import { isBadgeUpdate, type Placement, type Request, type Response } from '../lib/messages.ts';
-import { describeHeader, mount } from './badge.ts';
+import { describeHeader, isSignedIn, mount } from './badge.ts';
 
 const REMOUNT_INTERVAL_MS = 5_000;
-/** How long GitHub gets to render its header before the badge floats instead. */
+/** How long GitHub gets to render its header, after a load or a navigation, before the badge floats. */
 const FLOATING_AFTER_MS = 3_000;
-const startedAt = Date.now();
+/** Start of the current grace period: the script start, then each navigation. */
+let graceFrom = Date.now();
 // GitHub navigates without page loads (Turbo, then its own soft navigation); the periodic remount
 // covers any event not listed here.
 const NAVIGATION_EVENTS = [
@@ -27,6 +28,7 @@ const NAVIGATION_EVENTS = [
 let lastView: BadgeView | null = null;
 /** The placement last reported to the worker, so each change is reported once. */
 let reported: Placement | null = null;
+let requesting = false;
 
 function alive(): boolean {
   try {
@@ -41,9 +43,14 @@ function ensureMounted(): void {
     teardown();
     return;
   }
-  if (!lastView) return;
+  if (!lastView) {
+    // The first answer never came (worker starting, error): ask again on every check.
+    void requestBadge();
+    return;
+  }
   const mounted = mount(document, lastView, {
-    allowFloating: Date.now() - startedAt >= FLOATING_AFTER_MS,
+    // Signed-out, sudo or sign-in pages have no header by design: no floating badge there.
+    allowFloating: Date.now() - graceFrom >= FLOATING_AFTER_MS && isSignedIn(document),
   });
   if (mounted && mounted.placement !== reported) {
     reported = mounted.placement;
@@ -65,10 +72,16 @@ async function ask(request: Request): Promise<Response | null> {
 }
 
 async function requestBadge(): Promise<void> {
-  const response = await ask({ type: 'badge:get' });
-  if (response?.type === 'badge:view') {
-    lastView = response.view;
-    ensureMounted();
+  if (requesting) return;
+  requesting = true;
+  try {
+    const response = await ask({ type: 'badge:get' });
+    if (response?.type === 'badge:view') {
+      lastView = response.view;
+      ensureMounted();
+    }
+  } finally {
+    requesting = false;
   }
 }
 
@@ -85,17 +98,25 @@ function onMessage(message: unknown): boolean {
 }
 
 const timer = window.setInterval(ensureMounted, REMOUNT_INTERVAL_MS);
-const floatingCheck = window.setTimeout(ensureMounted, FLOATING_AFTER_MS);
+let graceCheck = window.setTimeout(ensureMounted, FLOATING_AFTER_MS);
+
+/** A navigation may bring a header that renders late: give it a fresh grace period. */
+function onNavigate(): void {
+  graceFrom = Date.now();
+  window.clearTimeout(graceCheck);
+  graceCheck = window.setTimeout(ensureMounted, FLOATING_AFTER_MS);
+  ensureMounted();
+}
 
 function teardown(): void {
   window.clearInterval(timer);
-  window.clearTimeout(floatingCheck);
-  for (const event of NAVIGATION_EVENTS) document.removeEventListener(event, ensureMounted);
+  window.clearTimeout(graceCheck);
+  for (const event of NAVIGATION_EVENTS) document.removeEventListener(event, onNavigate);
   document.removeEventListener('visibilitychange', onVisibilityChange);
 }
 
 chrome.runtime.onMessage.addListener(onMessage);
-for (const event of NAVIGATION_EVENTS) document.addEventListener(event, ensureMounted);
+for (const event of NAVIGATION_EVENTS) document.addEventListener(event, onNavigate);
 document.addEventListener('visibilitychange', onVisibilityChange);
 
 void requestBadge();
