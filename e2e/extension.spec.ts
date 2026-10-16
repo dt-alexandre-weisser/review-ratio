@@ -353,8 +353,8 @@ test("holds the badge's place while GitHub's React takes over its header", async
   const badge = github.locator('#review-ratio-badge');
   const standIn = () =>
     github.evaluate(() => {
-      const group = document.querySelector('[class*="Search-module__searchButtonGroup"]')!;
-      const before = getComputedStyle(group, '::before');
+      const row = document.querySelector('[data-testid="top-nav-center"]')!;
+      const before = getComputedStyle(row, '::before');
       return { content: before.content, width: before.width };
     });
 
@@ -373,38 +373,50 @@ test("holds the badge's place while GitHub's React takes over its header", async
   expect(marked).toBeGreaterThan(1_000);
 });
 
-test('shows the badge or its stand-in on every frame when a navigation brings a new header', async ({
-  context,
-  extensionId,
-}) => {
-  await installFakeGitHub(context, { hydratesAfterMs: 0 });
-  const options = await context.newPage();
-  await configure(options, extensionId, { token: 'github_pat_e2e' });
-  const github = await context.newPage();
-  await github.setViewportSize({ width: 1400, height: 600 });
-  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
-  await expect(github.locator('#review-ratio-badge')).toHaveAttribute('data-placement', 'header');
+for (const width of [1400, 960]) {
+  test(`shows the badge or its stand-in on every frame when a navigation brings a new header, ${width} px`, async ({
+    context,
+    extensionId,
+  }) => {
+    await installFakeGitHub(context, { hydratesAfterMs: 0 });
+    const options = await context.newPage();
+    await configure(options, extensionId, { token: 'github_pat_e2e' });
+    const github = await context.newPage();
+    await github.setViewportSize({ width, height: 600 });
+    await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+    await expect(github.locator('#review-ratio-badge')).toHaveAttribute('data-placement', 'header');
 
-  const frames = await github.evaluate(async () => {
-    const shown = () => {
-      if (document.getElementById('review-ratio-badge')) return 'badge';
-      const group = document.querySelector('[class*="Search-module__searchButtonGroup"]');
-      return group && getComputedStyle(group, '::before').content !== 'none' ? 'stand-in' : 'none';
-    };
-    const seen: string[] = [];
-    for (const delay of [0, 50, 150]) {
-      (window as unknown as { swapHeader: (ms: number) => void }).swapHeader(delay);
-      for (let i = 0; i < 20; i++) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-        seen.push(shown());
+    const result = await github.evaluate(async () => {
+      const shown = () => {
+        if (document.getElementById('review-ratio-badge')) return 'badge';
+        const row = document.querySelector('[data-testid="top-nav-center"]');
+        return row && getComputedStyle(row, '::before').content !== 'none' ? 'stand-in' : 'none';
+      };
+      const page = window as unknown as {
+        swapHeader: (ms: number) => Promise<void>;
+        swaps: { badgeAt: number | null; commitAt: number | null }[];
+      };
+      const frames: string[] = [];
+      for (const delay of [0, 16, 50, 150]) {
+        await page.swapHeader(delay);
+        for (let i = 0; i < 20; i++) {
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          frames.push(shown());
+        }
       }
+      return { frames, swaps: page.swaps };
+    });
+    expect(result.frames).not.toContain('none');
+    expect(result.frames).toContain('stand-in');
+    expect(result.frames.at(-1)).toBe('badge');
+    // Never in a header React has not taken over yet.
+    for (const swap of result.swaps) {
+      expect(swap.commitAt).not.toBeNull();
+      expect(swap.badgeAt).not.toBeNull();
+      expect(swap.badgeAt!).toBeGreaterThanOrEqual(swap.commitAt!);
     }
-    return seen;
   });
-  expect(frames).not.toContain('none');
-  expect(frames).toContain('stand-in');
-  expect(frames.at(-1)).toBe('badge');
-});
+}
 
 test('keeps the badge on screen when GitHub replaces its header, without a single frame missing', async ({
   context,

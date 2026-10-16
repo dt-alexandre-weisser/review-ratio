@@ -43,17 +43,3 @@ export function hidePlaceholder(doc: Document): void {
   if (doc.documentElement.hasAttribute(PLACEHOLDER))
     doc.documentElement.removeAttribute(PLACEHOLDER);
 }
-
-/**
- * Remembers the gap the badge left before the search group, so the stand-in sits where the badge
- * will.
- */
-export function rememberGap(doc: Document, badge: HTMLElement): void {
-  const next = badge.nextElementSibling;
-  if (!next?.matches('[class*="Search-module__searchButtonGroup"]')) return;
-  const gap = Math.round(next.getBoundingClientRect().left - badge.getBoundingClientRect().right);
-  const style = doc.documentElement.style;
-  if (gap >= 0 && gap <= 64 && style.getPropertyValue('--review-ratio-gap') !== `${gap}px`) {
-    style.setProperty('--review-ratio-gap', `${gap}px`);
-  }
-}

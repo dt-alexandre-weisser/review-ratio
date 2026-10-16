@@ -216,16 +216,19 @@ question below.
   cached badge at once. GitHub renders its header on the server, then React hydrates it; a node
   added before that makes React throw the header away and render it again. GitHub marks each
   React root's commit (`react-root:commit:<partial>`) and performance marks are shared with the
-  extension's world, so the badge goes in on the first frame after that mark. A header brought by
-  a navigation (Turbo swaps the whole body) waits for a commit after that navigation. Should
-  GitHub rename the mark, the badge goes in anyway 3 seconds after the page's `load`, never
-  during a slow load.
-- Until then a stand-in holds the badge's place: a `::before` pseudo-element on GitHub's search
-  group, drawn by CSS alone from custom properties and attributes on `<html>`, so it adds no node
-  to React's tree. It has the badge's text, box and colours (a hard-stop gradient clipped to the
-  monospace text colours ↑, ↓ and the ratio apart) and the gap the badge last left before the
-  search. The badge replaces it in the same task: no frame shows neither or both. Measured on
-  GitHub's real header CSS, the search box keeps its position and corners.
+  extension's world, so the badge goes in on the first frame after that mark. Each mark makes one
+  header ready: a header brought by a navigation (Turbo swaps the whole body, and only announces
+  it with `turbo:render` afterwards) needs a newer mark, and one after the navigation's start
+  (`turbo:visit`, `turbo:before-render`, `soft-nav:start`). Should GitHub rename the mark, the
+  badge goes in anyway 3 seconds after the page's `load`, never during a slow load.
+- Until then a stand-in holds the badge's place: a `::before` pseudo-element of the header's
+  centre row, ordered after the breadcrumbs, so it sits where the badge goes at every width
+  (GitHub hides the search group at 1,024 px and less, not the row). Drawn by CSS alone from
+  custom properties and attributes on `<html>`, it adds no node to React's tree. It has the
+  badge's text, box and colours (a hard-stop gradient clipped to the monospace text colours ↑, ↓
+  and the ratio apart). The badge replaces it in the same task: no frame shows neither or both.
+  On GitHub's real header CSS, from 768 to 1,400 px, the stand-in and the badge render alike and
+  the search box keeps its position and corners.
 - When GitHub re-renders or replaces the header, a mutation observer puts the badge back in the
   same microtask, before anything paints. Past 20 restores in a second, it waits for the next
   frame instead.

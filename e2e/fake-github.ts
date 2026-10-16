@@ -103,6 +103,14 @@ export interface FakeGitHubOptions {
 }
 
 const ROW = 'display:flex;align-items:center;gap:8px';
+/** GitHub's own rule: at 1,024 px and less the search box gives way to a search icon. */
+const NARROW = `<style>
+  .Search-module__smallSearchButton { display: none }
+  @media (max-width: 1024px) {
+    [class*="Search-module__searchButtonGroup"] { display: none !important }
+    .Search-module__smallSearchButton { display: inline-block }
+  }
+</style>`;
 const HEADERS = {
   // From an archived github.com page and GitHub's bundles, October 2026: Primer stacks, the search
   // box a button group (search, command palette) in the centre row.
@@ -115,6 +123,7 @@ const HEADERS = {
           <div><button class="Search-module__searchButton__aiE0a" aria-label="Open quick search dialog, type / to search" style="border-radius:6px 0 0 6px">Type / to search</button></div>
           <div><button aria-label="Command palette" style="border-radius:0 6px 6px 0">&gt;</button></div>
         </div>
+        <button class="Search-module__smallSearchButton" aria-label="Open quick search dialog">search</button>
       </div>
       <div data-testid="top-nav-right" style="${ROW}"><button aria-label="Chat with Copilot">copilot</button><button>+</button><a href="/notifications">inbox</a></div>
     </div>
@@ -152,15 +161,31 @@ function header(options: FakeGitHubOptions): string {
       <script>
         const commit = () => performance.mark('react-root:commit:global-nav-bar');
         setTimeout(commit, ${options.hydratesAfterMs});
-        window.swapHeader = (ms) => {
+        // As GitHub's Turbo does: turbo:before-render, the swap, then turbo:render after an await.
+        // Records when the badge entered each new header and when React committed it.
+        window.swaps = [];
+        window.swapHeader = async (ms) => {
+          document.dispatchEvent(new Event('turbo:before-render'));
           const old = document.querySelector('react-partial');
           const fresh = document.createElement('react-partial');
           fresh.setAttribute('partial-name', 'global-nav-bar');
           fresh.setAttribute('data-ssr', 'true');
           fresh.innerHTML = ${JSON.stringify(html)};
+          const swap = { badgeAt: null, commitAt: null };
+          window.swaps.push(swap);
+          new MutationObserver((records, observer) => {
+            if (fresh.querySelector('#review-ratio-badge')) {
+              swap.badgeAt = performance.now();
+              observer.disconnect();
+            }
+          }).observe(fresh, { childList: true, subtree: true });
           old.replaceWith(fresh);
+          setTimeout(() => {
+            commit();
+            swap.commitAt = performance.now();
+          }, ms);
+          await new Promise((resolve) => setTimeout(resolve, 5));
           document.dispatchEvent(new Event('turbo:render'));
-          setTimeout(commit, ms);
         };
       </script>`;
   }
@@ -174,6 +199,7 @@ export async function installFakeGitHub(context: BrowserContext, options: FakeGi
       contentType: 'text/html',
       body: `<!doctype html><html><head><title>GitHub</title>
         ${options.signedOut ? '' : `<meta name="user-login" content="${ME}">`}
+        ${NARROW}
         </head><body class="${options.signedOut ? 'logged-out' : 'logged-in'}">
         ${header(options)}
         <main><h1>Fake GitHub</h1></main></body></html>`,

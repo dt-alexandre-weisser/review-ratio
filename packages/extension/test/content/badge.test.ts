@@ -379,6 +379,22 @@ describe('headerReady', () => {
     expect(headerReady(document, navigated, seen + 2)).toBe(true);
   });
 
+  it('lets each commit mark make one header ready, whatever the order of events', () => {
+    performance.clearMarks();
+    const t = performance.now() + 1_000;
+    document.body.innerHTML = ssr(GLOBAL_NAV);
+    expect(headerReady(document, t, t + 1)).toBe(false);
+    performance.mark('react-root:commit:global-nav-bar', { startTime: t + 5 });
+    expect(headerReady(document, t, t + 6)).toBe(true);
+    expect(headerReady(document, t, t + 7)).toBe(true);
+    // Turbo swaps the next header in before it announces the navigation: the last navigation
+    // time is still t, and the previous header's commit comes after it. It is used already.
+    document.body.innerHTML = ssr(GLOBAL_NAV);
+    expect(headerReady(document, t, t + 10)).toBe(false);
+    performance.mark('react-root:commit:global-nav-bar', { startTime: t + 12 });
+    expect(headerReady(document, t, t + 13)).toBe(true);
+  });
+
   it('places the badge anyway a while after the page has loaded, not before', () => {
     performance.clearMarks();
     const readyState = vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading');

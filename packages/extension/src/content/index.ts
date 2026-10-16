@@ -20,7 +20,7 @@ import {
   isSignedIn,
   mount,
 } from './badge.ts';
-import { hidePlaceholder, rememberGap, showPlaceholder } from './placeholder.ts';
+import { hidePlaceholder, showPlaceholder } from './placeholder.ts';
 
 const REMOUNT_INTERVAL_MS = 5_000;
 /** How long GitHub gets to render its header, after a load or a navigation, before the badge floats. */
@@ -39,6 +39,8 @@ const NAVIGATION_EVENTS = [
   'pjax:end',
   'pageshow',
 ];
+/** Fired before GitHub swaps in a new page: a header seen after them is a new one. */
+const NAVIGATION_START_EVENTS = ['turbo:visit', 'turbo:before-render', 'soft-nav:start'];
 
 let lastView: BadgeView | null = null;
 /** The placement last reported to the worker, so each change is reported once. */
@@ -46,7 +48,7 @@ let reported: Placement | null = null;
 let requesting = false;
 let frame = 0;
 let restores = { second: 0, count: 0 };
-/** When GitHub last navigated without a page load (`performance.now()`), if ever. */
+/** When GitHub last started a navigation without a page load (`performance.now()`), if ever. */
 let navigatedAt: number | null = null;
 
 function alive(): boolean {
@@ -87,7 +89,6 @@ function ensureMounted(): void {
   });
   // In the same task as the insertion: no frame shows both, or neither.
   hidePlaceholder(document);
-  if (mounted?.placement === 'header') rememberGap(document, mounted.el);
   if (mounted && mounted.placement !== reported) {
     reported = mounted.placement;
     void ask({
@@ -164,8 +165,11 @@ const timer = window.setInterval(ensureMounted, REMOUNT_INTERVAL_MS);
 let graceCheck = window.setTimeout(ensureMounted, FLOATING_AFTER_MS);
 
 /** A navigation may bring a header that renders late: give it a fresh grace period. */
-function onNavigate(): void {
+function onNavigationStart(): void {
   navigatedAt = performance.now();
+}
+
+function onNavigate(): void {
   forgetRejections();
   graceFrom = Date.now();
   window.clearTimeout(graceCheck);
@@ -193,6 +197,9 @@ function teardown(): void {
   window.clearTimeout(resizeTimer);
   window.removeEventListener('resize', onResize);
   for (const event of NAVIGATION_EVENTS) document.removeEventListener(event, onNavigate);
+  for (const event of NAVIGATION_START_EVENTS) {
+    document.removeEventListener(event, onNavigationStart);
+  }
   document.removeEventListener('visibilitychange', onVisibilityChange);
 }
 
@@ -200,6 +207,7 @@ chrome.runtime.onMessage.addListener(onMessage);
 // The document element exists from the start and survives Turbo's body swaps.
 observer.observe(document.documentElement, { childList: true, subtree: true });
 for (const event of NAVIGATION_EVENTS) document.addEventListener(event, onNavigate);
+for (const event of NAVIGATION_START_EVENTS) document.addEventListener(event, onNavigationStart);
 window.addEventListener('resize', onResize);
 document.addEventListener('visibilitychange', onVisibilityChange);
 

@@ -72,17 +72,22 @@
 
 /*
  * Stand-in while GitHub's React takes over its server-rendered header. The badge cannot go in
- * before that (React would throw the header away), so the place is held by a pseudo-element on
- * GitHub's search group: drawn by CSS alone, it adds no node to React's tree. The content script
- * sets the text and the colour stops on <html>; it looks like the badge, and the badge replaces it
- * in the same frame.
+ * before that (React would throw the header away), so the place is held by a pseudo-element of
+ * the header's centre row: drawn by CSS alone, it adds no node to React's tree. Ordered after the
+ * breadcrumbs, it sits where the badge goes, before the search, at every width (GitHub hides the
+ * search group at 1,024 px and less, not the row). The content script sets the text and the
+ * colour stops on <html>; it looks like the badge, and the badge replaces it in the same frame.
  */
-html[data-review-ratio-placeholder] [class*='Search-module__searchButtonGroup']::before {
+html[data-review-ratio-placeholder] [data-testid='top-nav-center'] > nav {
+  order: -1;
+}
+
+html[data-review-ratio-placeholder] [data-testid='top-nav-center']::before {
   content: var(--review-ratio-text);
   display: inline-flex;
   align-items: center;
   align-self: center;
-  margin: 0 var(--review-ratio-gap, 16px) 0 8px;
+  margin: 0 8px;
   padding: 3px 8px;
   border: 1px solid var(--review-ratio-border);
   border-radius: 6px;
@@ -101,7 +106,7 @@ html[data-review-ratio-placeholder] [class*='Search-module__searchButtonGroup']:
 /* ↑, separators, ↓ and the ratio coloured apart: a hard-stop gradient clipped to the text, with
    stops between characters of the monospace text. */
 html[data-review-ratio-placeholder][data-review-ratio-colors]
-  [class*='Search-module__searchButtonGroup']::before {
+  [data-testid='top-nav-center']::before {
   color: transparent;
   background-image: linear-gradient(
     90deg,
@@ -116,7 +121,7 @@ html[data-review-ratio-placeholder][data-review-ratio-colors]
 }
 
 html[data-review-ratio-placeholder][data-review-ratio-stale='true']
-  [class*='Search-module__searchButtonGroup']::before {
+  [data-testid='top-nav-center']::before {
   opacity: 0.6;
 }
 
@@ -142,7 +147,7 @@ html[data-review-ratio-placeholder][data-review-ratio-tone='low'] {
 }
 
 @media (max-width: 1280px) {
-  html[data-review-ratio-placeholder] [class*='Search-module__searchButtonGroup']::before {
+  html[data-review-ratio-placeholder] [data-testid='top-nav-center']::before {
     content: var(--review-ratio-short);
     color: var(--review-ratio-tone);
     background-image: none;

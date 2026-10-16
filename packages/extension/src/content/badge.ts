@@ -200,11 +200,17 @@ interface RootSeen {
   since: number;
   /** Start of the fallback clock: the page's load, or when a later root was first seen. */
   clockFrom: number | null;
+  /** Once ready, a root stays ready. */
+  ready: boolean;
 }
 
-/** Server-rendered React roots seen, and when the last one was first seen. */
+/** Server-rendered React roots seen. */
 const rootsSeen = new WeakMap<Element, RootSeen>();
-let lastRootSeenAt: number | null = null;
+/**
+ * The newest commit mark that made a root ready. Each mark makes one root ready: a root swapped
+ * in later needs a newer mark, whatever the order of GitHub's navigation events and DOM changes.
+ */
+let usedMark = Number.NEGATIVE_INFINITY;
 
 /**
  * Whether the header can take the badge now. GitHub renders its header on the server, then React
@@ -212,7 +218,8 @@ let lastRootSeenAt: number | null = null;
  * GitHub marks each React root's commit (`react-root:commit:<name>`), and performance marks are
  * shared with the extension's world.
  *
- * `navigatedAt` is when GitHub last navigated without a page load (`performance.now()`), if ever.
+ * `navigatedAt` is when GitHub last started a navigation without a page load
+ * (`performance.now()`), if ever: a root first seen after it needs a commit after it.
  */
 export function headerReady(
   doc: Document,
@@ -225,25 +232,25 @@ export function headerReady(
   const name = root.getAttribute('partial-name') ?? root.getAttribute('app-name') ?? '';
   let seen = rootsSeen.get(root);
   if (!seen) {
-    // The page load's root may have committed before this script ran: any commit counts. A root
-    // brought by a navigation needs a commit after that navigation; without a navigation since
-    // the previous root, after its first sight.
-    const navigated =
-      navigatedAt !== null && (lastRootSeenAt === null || navigatedAt > lastRootSeenAt);
-    seen = {
-      since: navigated ? navigatedAt : lastRootSeenAt === null ? 0 : now,
-      clockFrom: null,
-    };
+    seen = { since: navigatedAt ?? Number.NEGATIVE_INFINITY, clockFrom: null, ready: false };
     rootsSeen.set(root, seen);
-    lastRootSeenAt = now;
   }
+  if (seen.ready) return true;
   // The fallback clock starts once the page has loaded: a slow load is not a renamed mark.
   if (seen.clockFrom === null && doc.readyState === 'complete') seen.clockFrom = now;
-  if (seen.clockFrom !== null && now - seen.clockFrom >= HYDRATION_WAIT_MS) return true;
+  if (seen.clockFrom !== null && now - seen.clockFrom >= HYDRATION_WAIT_MS) {
+    seen.ready = true;
+    return true;
+  }
   const since = seen.since;
-  return performance
+  const commits = performance
     .getEntriesByName(`react-root:commit:${name}`, 'mark')
-    .some((mark) => mark.startTime >= since);
+    .map((mark) => mark.startTime)
+    .filter((at) => at >= since && at > usedMark);
+  if (commits.length === 0) return false;
+  usedMark = Math.max(...commits);
+  seen.ready = true;
+  return true;
 }
 
 function span(doc: Document, className: string, text: string): HTMLSpanElement {

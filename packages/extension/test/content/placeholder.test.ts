@@ -1,12 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  cssString,
-  hidePlaceholder,
-  rememberGap,
-  showPlaceholder,
-} from '../../src/content/placeholder.ts';
+import { cssString, hidePlaceholder, showPlaceholder } from '../../src/content/placeholder.ts';
 import type { BadgeView } from '../../src/lib/badge-state.ts';
 
 const view: BadgeView = {
@@ -66,22 +61,5 @@ describe('the stand-in', () => {
 
   it('escapes CSS strings', () => {
     expect(cssString('a"b\\c\nd')).toBe('"a\\"b\\\\c\\a d"');
-  });
-
-  it('remembers the gap before the search group only', () => {
-    document.body.innerHTML =
-      '<div><span id="b"></span><div class="Search-module__searchButtonGroup__x" id="g"></div><i id="o"></i></div>';
-    const badge = document.getElementById('b')!;
-    const group = document.getElementById('g')!;
-    badge.getBoundingClientRect = () => ({ right: 100 }) as DOMRect;
-    group.getBoundingClientRect = () => ({ left: 116 }) as DOMRect;
-    rememberGap(document, badge);
-    expect(prop('--review-ratio-gap')).toBe('16px');
-    group.getBoundingClientRect = () => ({ left: 400 }) as DOMRect;
-    rememberGap(document, badge);
-    expect(prop('--review-ratio-gap')).toBe('16px');
-    document.getElementById('o')!.before(badge);
-    rememberGap(document, badge);
-    expect(prop('--review-ratio-gap')).toBe('16px');
   });
 });
