@@ -235,20 +235,28 @@ export function headerReady(
     seen = { since: navigatedAt ?? Number.NEGATIVE_INFINITY, clockFrom: null, ready: false };
     rootsSeen.set(root, seen);
   }
-  if (seen.ready) return true;
+  const since = seen.since;
+  const commits = () =>
+    performance
+      .getEntriesByName(`react-root:commit:${name}`, 'mark')
+      .map((mark) => mark.startTime)
+      .filter((at) => at >= since && at > usedMark);
+  if (seen.ready) {
+    // A header made ready by the fallback may still commit: that mark is its own, used up here
+    // so that the next header cannot take it.
+    const late = commits();
+    if (late.length > 0) usedMark = Math.max(...late);
+    return true;
+  }
   // The fallback clock starts once the page has loaded: a slow load is not a renamed mark.
   if (seen.clockFrom === null && doc.readyState === 'complete') seen.clockFrom = now;
   if (seen.clockFrom !== null && now - seen.clockFrom >= HYDRATION_WAIT_MS) {
     seen.ready = true;
     return true;
   }
-  const since = seen.since;
-  const commits = performance
-    .getEntriesByName(`react-root:commit:${name}`, 'mark')
-    .map((mark) => mark.startTime)
-    .filter((at) => at >= since && at > usedMark);
-  if (commits.length === 0) return false;
-  usedMark = Math.max(...commits);
+  const found = commits();
+  if (found.length === 0) return false;
+  usedMark = Math.max(...found);
   seen.ready = true;
   return true;
 }

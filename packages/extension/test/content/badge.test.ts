@@ -408,8 +408,15 @@ describe('headerReady', () => {
     expect(headerReady(document, null, loaded)).toBe(false);
     expect(headerReady(document, null, loaded + HYDRATION_WAIT_MS - 1)).toBe(false);
     // A whole millisecond past: `(a + 3000) - a` may round below 3000.
-    expect(headerReady(document, null, loaded + HYDRATION_WAIT_MS + 1)).toBe(true);
+    const late = loaded + HYDRATION_WAIT_MS + 1;
+    expect(headerReady(document, null, late)).toBe(true);
     readyState.mockRestore();
+
+    // That header commits after all: its mark is its own, not the next header's.
+    performance.mark('react-root:commit:global-nav-bar', { startTime: late + 1 });
+    expect(headerReady(document, null, late + 2)).toBe(true);
+    document.body.innerHTML = ssr(GLOBAL_NAV);
+    expect(headerReady(document, null, late + 3)).toBe(false);
   });
 
   it('reads the signed-in signal while the body does not exist yet', () => {
