@@ -5,12 +5,14 @@
  *
  * It lives in `chrome.storage.session`: in memory, out of reach of content scripts, and gone when
  * the browser closes. It holds URLs and request bodies, so repository names, PR numbers and the
- * user's login, but never a header and so never the token. Nothing in it leaves the browser.
+ * user's login, but never a header and so never the token. Calls to github.com/login (the GitHub
+ * App sign-in and its renewals) are logged without their body: it holds the device code or the
+ * refresh token. No response body is ever kept. Nothing in it leaves the browser.
  *
  * A GraphQL body is kept as its variables plus a reference to the query text, which is stored
  * once under `activityQuery:<id>`: thousands of calls share three queries.
  *
- * Several contexts write it (the worker, and the options page for Test connection). Each flush
+ * Any extension context may write it, though today only the worker does. Each flush
  * writes its own key, so writers never overwrite each other and no read-modify-write is needed.
  */
 import { localTime } from './time.ts';
@@ -370,6 +372,11 @@ export function describeBody(body: BodyInit | null | undefined): string | null {
   return `${operation}${pr}${typeof after === 'string' ? ', next page' : ''}`;
 }
 
+/** github.com/login calls send codes and tokens in their body: the log never keeps it. */
+export function isCredentialCall(url: string): boolean {
+  return url.startsWith('https://github.com/login/');
+}
+
 /** Wraps `fetch` so that every call lands in the log, answered or not. */
 export function loggingFetch(
   inner: typeof fetch,
@@ -383,8 +390,9 @@ export function loggingFetch(
     const url = cleanUrl(
       typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
     );
-    const detail = describeBody(init?.body);
-    const sent = typeof init?.body === 'string' ? init.body : undefined;
+    const credential = isCredentialCall(url);
+    const detail = credential ? null : describeBody(init?.body);
+    const sent = !credential && typeof init?.body === 'string' ? init.body : undefined;
     let response: Response;
     try {
       response = await inner(input, init);

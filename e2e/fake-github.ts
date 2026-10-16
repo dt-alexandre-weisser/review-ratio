@@ -210,6 +210,9 @@ export async function installFakeGitHub(context: BrowserContext, options: FakeGi
     if (options.rejectToken) return json(route, { message: 'Bad credentials' }, 401);
     const url = new URL(route.request().url());
     if (url.pathname === '/user') return json(route, { login: ME });
+    if (url.pathname === '/user/installations') {
+      return json(route, { total_count: 1, installations: [{ id: 1, account: { login: ORG } }] });
+    }
     if (url.pathname === `/orgs/${ORG}/repos`) return json(route, [{ id: 1, private: true }]);
     if (url.pathname === '/search/issues') {
       const q = url.searchParams.get('q') ?? '';
@@ -235,4 +238,43 @@ export async function installFakeGitHub(context: BrowserContext, options: FakeGi
     }
     return json(route, { message: 'Not Found' }, 404);
   });
+}
+
+export const USER_CODE = 'E2E1-CODE';
+
+/**
+ * GitHub's device flow, as the review-ratio app answers it: a code, one "pending" poll, then
+ * expiring tokens. Added after installFakeGitHub, these routes run first. Returns the form bodies
+ * the extension posted.
+ */
+export async function installFakeGitHubLogin(context: BrowserContext) {
+  const posted: Record<string, string>[] = [];
+  let polls = 0;
+  await context.route('https://github.com/login/**', (route) => {
+    const url = new URL(route.request().url());
+    posted.push(Object.fromEntries(new URLSearchParams(route.request().postData() ?? '')));
+    if (url.pathname === '/login/device/code') {
+      return json(route, {
+        device_code: 'device_e2e',
+        user_code: USER_CODE,
+        verification_uri: 'https://github.com/login/device',
+        expires_in: 900,
+        interval: 1,
+      });
+    }
+    if (url.pathname === '/login/oauth/access_token') {
+      polls += 1;
+      if (polls === 1) return json(route, { error: 'authorization_pending' });
+      return json(route, {
+        access_token: 'ghu_e2e',
+        expires_in: 28_800,
+        refresh_token: 'ghr_e2e',
+        refresh_token_expires_in: 15_897_600,
+        token_type: 'bearer',
+        scope: '',
+      });
+    }
+    return json(route, { error: 'not_found' }, 404);
+  });
+  return posted;
 }

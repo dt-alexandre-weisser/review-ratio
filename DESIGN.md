@@ -174,12 +174,13 @@ One pnpm monorepo, TypeScript throughout. One package, `packages/extension`: the
 
 ## Auth
 
-| Phase | Mechanism |
+| Mode | Mechanism |
 | --- | --- |
-| Prototype | Fine-grained PAT, read-only (Pull requests, Contents, Metadata), resource owner `DiliTrust`, pasted in the options page, stored in `chrome.storage.local` |
-| Rollout | GitHub App with the device flow. One click, auto-refreshed user-to-server token. Needs an org admin to create and install the app once. |
+| Sign in with GitHub (recommended) | The review-ratio GitHub App with the device flow. One click and a code to type, an expiring user token renewed by itself. Needs an org owner to install the app once. |
+| Paste a token (fallback) | Fine-grained PAT, read-only (Pull requests, Contents, Metadata), resource owner `DiliTrust`, pasted in the options page |
 
-The scopes are the same in both phases. Only the auth module changes.
+The permissions are the same in both modes, and both store their tokens in `chrome.storage.local`.
+The app's settings and installation are in `docs/github-app-setup.md`.
 
 ## Repository
 
@@ -188,5 +189,6 @@ The scopes are the same in both phases. Only the auth module changes.
 
 ## Open items
 
-- **Rollout.** Org admin steps for the GitHub App and the repo transfer.
+- **Rollout.** Installing the GitHub App on `DiliTrust` (`docs/github-app-setup.md`) and the
+  repo transfer.
 - **Browsers.** Firefox (small manifest changes) and Safari (Xcode wrapper).

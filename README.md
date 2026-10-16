@@ -14,19 +14,19 @@ full product design is in [DESIGN.md](DESIGN.md).
 ## How it works
 
 ```
-github.com page ──► extension (MV3) ──► GitHub API (your own token, read-only)
+github.com page ──► extension (MV3) ──► GitHub API (your own read-only access)
                          │
                          ▼
               classify, round, score, all in the browser ──► { up, down, ratio }
 ```
 
 1. The extension reads your last 7 days of review activity in the organisation with your own
-   read-only token.
+   read-only access: the review-ratio GitHub App you signed in with, or a token you pasted.
 2. It classifies each file path (`production`, `test`, `docs`…) with globs bundled in the
    extension, then forgets the path.
 3. It turns what it read into numbers only: line counts per class, rounded times, review actions.
 4. It scores those numbers with the public formula, and shows `{ up, down, ratio }`. Nothing leaves
-   the browser except the GitHub API calls made with your token.
+   the browser except the calls to `api.github.com` and `github.com`.
 
 The options page links to **How Review Points are counted**, a page of the extension that shows the
 whole formula: every weight, threshold and glob, rendered from the constants the badge runs on.
@@ -45,14 +45,29 @@ Load the extension:
 
 1. Open `chrome://extensions` and turn on **Developer mode**.
 2. Click **Load unpacked** and pick `packages/extension/dist`.
-3. The options page opens. Paste a token (below), click **Save**, then **Test connection**. The
-   test also checks that the token can see the organisation's private repositories.
+3. The options page opens. Connect to GitHub (below), click **Save**, then **Test connection**.
+   The test also checks that the extension can see the organisation's private repositories.
 4. Open any github.com page. The badge appears in the header within a few seconds.
 
 Every install has the same extension id, `bhmdipijifghpkibegnfchgcafodlgnb`, pinned by the public
 key in the manifest.
 
-Create the token at <https://github.com/settings/personal-access-tokens/new>:
+### Connect to GitHub
+
+The options page offers two ways. Both read the same data with the same read-only permissions
+(Pull requests, Contents, Metadata).
+
+**Sign in with GitHub (recommended).** Click **Sign in with GitHub**: the page shows a code, and
+**Open GitHub** opens `github.com/login/device`, where you type it and authorise the review-ratio
+GitHub App. The page switches to "Signed in as …" by itself. The app's token expires after 8
+hours and renews itself; you sign in again only after about 6 months without use. An owner of the
+organisation must have installed the app once:
+<https://github.com/apps/review-ratio/installations/new> (see
+[docs/github-app-setup.md](docs/github-app-setup.md)). **Sign out** forgets the tokens in this
+browser; to revoke them at GitHub too, use Settings → Applications → Authorized GitHub Apps.
+
+**Paste a token.** Create a fine-grained personal access token at
+<https://github.com/settings/personal-access-tokens/new>:
 
 | Field             | Value                                               |
 | ----------------- | --------------------------------------------------- |
@@ -60,7 +75,8 @@ Create the token at <https://github.com/settings/personal-access-tokens/new>:
 | Repository access | All repositories                                    |
 | Permissions       | Pull requests: Read, Contents: Read, Metadata: Read |
 
-The token stays in `chrome.storage.local` and is only sent to `api.github.com`.
+Either way, the tokens stay in `chrome.storage.local`, out of reach of content scripts, and are
+only sent to GitHub.
 
 ## Badge states
 
@@ -72,7 +88,7 @@ The token stays in `chrome.storage.local` and is only sent to `api.github.com`.
 | Nothing asked                 | `Ratio ∞`, green                               |
 | No activity at all            | `Ratio —`, grey, still visible                 |
 | GitHub unreachable or refused | last ratio greyed, tooltip `stale since HH:MM` |
-| No token, or token rejected   | `review-ratio: set up` or `token rejected`     |
+| Not connected, or rejected    | `review-ratio: set up` or `token rejected`     |
 
 The badge refreshes on page load, at most once every 5 minutes; in between, every page shows the
 cached score. Clicking it does nothing. The
@@ -127,3 +143,5 @@ stays in memory and is gone when the browser closes. See [SECURITY.md](SECURITY.
   deliberately differs from the design and why.
 - [CONTRIBUTING.md](CONTRIBUTING.md): development workflow and CI gates.
 - [SECURITY.md](SECURITY.md): threat model and privacy guarantees.
+- [docs/github-app-setup.md](docs/github-app-setup.md): the review-ratio GitHub App, its settings
+  and its installation.

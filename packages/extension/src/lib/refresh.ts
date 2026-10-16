@@ -2,6 +2,7 @@
  * One refresh: settings → GitHub window → records → local score → cache.
  * Pure orchestration over injected dependencies so it can be tested without Chrome.
  */
+import type { TokenSource } from './auth/index.ts';
 import { createClassifier } from './classify.ts';
 import { collectWindow } from './collect/index.ts';
 import { GitHubAuthError, GitHubError, GitHubRateLimitError } from './github/client.ts';
@@ -15,7 +16,9 @@ import { REFRESH_INTERVAL_MS, REFRESH_LOCK_MS } from './time.ts';
 export interface RefreshDeps {
   store: Store;
   now: () => number;
-  github: (token: string) => GitHubClient;
+  /** The PAT or the GitHub App sign-in, whichever the settings say. */
+  auth: TokenSource;
+  github: (auth: TokenSource) => GitHubClient;
   randomUUID: () => string;
   log?: (message: string) => void;
 }
@@ -61,18 +64,7 @@ export async function refresh(deps: RefreshDeps, reason?: string): Promise<Badge
   const { store } = deps;
   await store.migrate();
   const settings = await store.getSettings();
-  if (!settings.token) {
-    // Once, not on every page load: without a token no refresh is ever recorded as attempted.
-    if ((await store.getBadge()).status !== 'no_token') {
-      deps.log?.('refresh skipped: no GitHub token');
-    }
-    return store.updateBadge({
-      status: 'no_token',
-      error: null,
-      refreshStartedAt: null,
-      unfinishedRefreshes: 0,
-    });
-  }
+  if (!(await deps.auth.hasCredential())) return notConnected(deps);
 
   const startedAt = deps.now();
   deps.log?.(`refresh started${reason ? ` (${reason})` : ''}`);
@@ -86,7 +78,7 @@ export async function refresh(deps: RefreshDeps, reason?: string): Promise<Badge
 
   try {
     const collected = await collectWindow({
-      github: deps.github(settings.token),
+      github: deps.github(deps.auth),
       settings,
       classify: createClassifier(CLASS_GLOBS),
       nowMs: startedAt,
@@ -117,6 +109,10 @@ export async function refresh(deps: RefreshDeps, reason?: string): Promise<Badge
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     deps.log?.(`refresh failed: ${message}`);
+    // GitHub refused to renew the app sign-in, which signed the developer out: back to set up.
+    if (error instanceof GitHubAuthError && !(await deps.auth.hasCredential())) {
+      return notConnected(deps);
+    }
     return store.updateBadge({
       ...failure(error),
       error: message,
@@ -124,6 +120,19 @@ export async function refresh(deps: RefreshDeps, reason?: string): Promise<Badge
       unfinishedRefreshes: 0,
     });
   }
+}
+
+async function notConnected(deps: RefreshDeps): Promise<BadgeCache> {
+  // Once, not on every page load: without a token no refresh is ever recorded as attempted.
+  if ((await deps.store.getBadge()).status !== 'no_token') {
+    deps.log?.('refresh skipped: no GitHub token');
+  }
+  return deps.store.updateBadge({
+    status: 'no_token',
+    error: null,
+    refreshStartedAt: null,
+    unfinishedRefreshes: 0,
+  });
 }
 
 function failure(error: unknown): Pick<BadgeCache, 'status' | 'notBefore'> {

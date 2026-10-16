@@ -1,13 +1,19 @@
 /**
  * Background service worker. Owns the refresh: the content script only ever asks for the
- * badge, and the worker decides whether the cache is fresh enough.
+ * badge, and the worker decides whether the cache is fresh enough. Owns the GitHub tokens too:
+ * the GitHub App sign-in runs here, and only here are app tokens used and renewed.
  */
 import { ActivityLog, chromeSessionArea, loggingFetch } from '../lib/activity-log.ts';
+import { GITHUB_APP_CLIENT_ID, GITHUB_APP_SLUG, installUrl } from '../lib/auth/app-config.ts';
+import { createAuth } from '../lib/auth/index.ts';
+import { FLOW_KEY, createSignIn } from '../lib/auth/sign-in.ts';
 import { badgeView } from '../lib/badge-state.ts';
+import { diagnose } from '../lib/diagnose.ts';
 import { createGitHubClient } from '../lib/github/client.ts';
 import { isRequest, type BadgeUpdate, type Request, type Response } from '../lib/messages.ts';
 import { refresh, refreshIfDue, type RefreshDeps } from '../lib/refresh.ts';
 import { recordPlacement } from '../lib/placement.ts';
+import { coerceSettings } from '../lib/settings.ts';
 import { Store, chromeStorageArea } from '../lib/storage.ts';
 import { isTrustedFor } from './senders.ts';
 
@@ -25,21 +31,57 @@ const activity = new ActivityLog(session, {
 // Resolved at call time, so the worker always uses the current global fetch.
 const loggedFetch = loggingFetch((input, init) => fetch(input, init), activity);
 
-// The GitHub token lives in storage.local. Content scripts never need it: keep it out of reach
+// The GitHub tokens live in storage.local. Content scripts never need it: keep it out of reach
 // of a compromised github.com renderer.
 chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch((error: unknown) => {
   console.warn('[review-ratio] cannot restrict storage access', error);
 });
 
+function log(message: string): void {
+  console.info(`[review-ratio] ${message}`);
+  activity.event(message);
+}
+
+/** Extension API calls reset the worker's idle timer; a long run of fetches does not. */
+function keepAlive(): () => void {
+  const timer = setInterval(() => {
+    void chrome.runtime.getPlatformInfo();
+  }, KEEP_ALIVE_MS);
+  return () => {
+    clearInterval(timer);
+  };
+}
+
+const auth = createAuth({
+  store,
+  fetchImpl: loggedFetch,
+  now: () => Date.now(),
+  clientId: GITHUB_APP_CLIENT_ID,
+  log,
+});
+
+const signIn = createSignIn({
+  auth,
+  store,
+  fetchImpl: loggedFetch,
+  now: () => Date.now(),
+  clientId: GITHUB_APP_CLIENT_ID,
+  slug: GITHUB_APP_SLUG,
+  publish: async (view) => {
+    await chrome.storage.session.set({ [FLOW_KEY]: view });
+    await activity.flush();
+  },
+  keepAlive,
+  log,
+});
+
 const deps: RefreshDeps = {
   store,
   now: () => Date.now(),
-  github: (token) => createGitHubClient({ token, fetchImpl: loggedFetch }),
+  auth,
+  github: (source) => createGitHubClient({ auth: source, fetchImpl: loggedFetch }),
   randomUUID: () => crypto.randomUUID(),
-  log: (message) => {
-    console.info(`[review-ratio] ${message}`);
-    activity.event(message);
-  },
+  log,
 };
 
 /**
@@ -53,17 +95,14 @@ let backgroundQueued = false;
 
 function enqueue(task: () => Promise<unknown>): Promise<void> {
   const run = queue.then(async () => {
-    // Extension API calls reset the worker's idle timer; a long refresh of fetches does not.
-    const keepAlive = setInterval(() => {
-      void chrome.runtime.getPlatformInfo();
-    }, KEEP_ALIVE_MS);
+    const stopKeepAlive = keepAlive();
     try {
       await task();
     } catch (error) {
       console.error('[review-ratio] refresh crashed', error);
       activity.event(`refresh crashed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      clearInterval(keepAlive);
+      stopKeepAlive();
       await activity.flush();
     }
   });
@@ -103,6 +142,28 @@ function refreshInBackground(): void {
   });
 }
 
+/** Test connection: the form's PAT as typed, or the app token, renewed first when due. */
+async function testConnection(raw: unknown): Promise<Response> {
+  const settings = coerceSettings(raw);
+  log('Test connection, asked by the options page');
+  try {
+    if (settings.authMode === 'pat') {
+      const { ok, lines } = await diagnose(settings, loggedFetch);
+      return { type: 'diagnosis', ok, lines };
+    }
+    // GitHub out of reach for the renewal: test with the stored token, so the diagnosis says why.
+    const creds = await store.getAppAuth();
+    const token = (await auth.getAccessToken().catch(() => creds?.accessToken ?? null)) ?? '';
+    const { ok, lines } = await diagnose({ ...settings, token }, loggedFetch, Date.now(), {
+      accessTokenExpiresAt: creds?.accessTokenExpiresAt ?? null,
+      installUrl: installUrl(GITHUB_APP_SLUG),
+    });
+    return { type: 'diagnosis', ok, lines };
+  } finally {
+    await activity.flush();
+  }
+}
+
 async function handle(request: Request): Promise<Response> {
   switch (request.type) {
     case 'badge:get': {
@@ -119,6 +180,16 @@ async function handle(request: Request): Promise<Response> {
     }
     case 'cache:get':
       return { type: 'cache', cache: await store.getBadge() };
+    case 'auth:status':
+      return { type: 'auth', status: await signIn.status() };
+    case 'auth:start':
+      return { type: 'auth', status: await signIn.start() };
+    case 'auth:cancel':
+      return { type: 'auth', status: await signIn.cancel() };
+    case 'auth:sign-out':
+      return { type: 'auth', status: await signIn.signOut() };
+    case 'connection:test':
+      return testConnection(request.settings);
     case 'badge:placed': {
       const report = { placement: request.placement, header: request.header, at: Date.now() };
       // One at a time: a report reads the previous one before writing.
@@ -177,8 +248,8 @@ chrome.runtime.onInstalled.addListener((details) => {
     void injectIntoOpenTabs();
   }
   if (details.reason === 'install') {
-    void store.getSettings().then((settings) => {
-      if (!settings.token) void chrome.runtime.openOptionsPage();
+    void auth.hasCredential().then((connected) => {
+      if (!connected) void chrome.runtime.openOptionsPage();
     });
   }
 });

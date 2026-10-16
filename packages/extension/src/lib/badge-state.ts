@@ -47,7 +47,7 @@ export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
       parts: null,
       tone: 'neutral',
       stale: true,
-      tooltip: 'review-ratio needs a GitHub token. Open the extension options.',
+      tooltip: 'review-ratio is not connected to GitHub. Open the extension options to sign in.',
     };
   }
   if (cache.status === 'bad_token') {

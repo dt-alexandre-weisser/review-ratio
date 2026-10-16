@@ -1,6 +1,14 @@
+/**
+ * How the extension gets its GitHub token: a GitHub App sign-in (device flow), or a fine-grained
+ * personal access token pasted in the options page.
+ */
+export type AuthMode = 'app' | 'pat';
+
 /** User settings, edited in the options page and stored in `chrome.storage.local`. */
 export interface Settings {
-  /** Fine-grained PAT, read-only. Empty until the developer pastes one. */
+  /** `pat` for settings saved before the app sign-in existed. */
+  authMode: AuthMode;
+  /** Fine-grained PAT, read-only. Empty until the developer pastes one, and in app mode. */
   token: string;
   /** The GitHub organisation whose repositories count. */
   org: string;
@@ -9,6 +17,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
+  authMode: 'pat',
   token: '',
   org: 'DiliTrust',
   excludedRepos: [],
@@ -44,6 +53,7 @@ export function isExcludedRepo(
 export function coerceSettings(raw: unknown): Settings {
   const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
   return {
+    authMode: r['authMode'] === 'app' ? 'app' : 'pat',
     token: typeof r['token'] === 'string' ? r['token'].trim() : DEFAULT_SETTINGS.token,
     org: typeof r['org'] === 'string' && r['org'].trim() ? r['org'].trim() : DEFAULT_SETTINGS.org,
     excludedRepos: Array.isArray(r['excludedRepos'])

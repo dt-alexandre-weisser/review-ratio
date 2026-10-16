@@ -1,12 +1,11 @@
 /**
- * Options page: the token, the scope, a few diagnostics and the activity log.
+ * Options page: GitHub access (app sign-in or token), the scope, a few diagnostics and the
+ * activity log. The sign-in and Test connection run in the service worker, which owns the tokens.
  */
 import {
-  ActivityLog,
   chromeSessionArea,
   clearActivity,
   formatBody,
-  loggingFetch,
   readActivity,
   readQuery,
   rowOf,
@@ -15,20 +14,21 @@ import {
   type ActivityEntry,
   type CallEntry,
 } from '../lib/activity-log.ts';
-import { diagnose } from '../lib/diagnose.ts';
+import { FLOW_KEY, type AuthStatus } from '../lib/auth/sign-in.ts';
 import { clearPlacement, readPlacement } from '../lib/placement.ts';
 import type { Request, Response } from '../lib/messages.ts';
-import { DEFAULT_SETTINGS, isValidOrg, parseExcludeList, type Settings } from '../lib/settings.ts';
+import {
+  DEFAULT_SETTINGS,
+  isValidOrg,
+  parseExcludeList,
+  type AuthMode,
+  type Settings,
+} from '../lib/settings.ts';
 import { Store, chromeStorageArea, type BadgeCache } from '../lib/storage.ts';
-import { localTime } from '../lib/time.ts';
+import { localClock, localTime } from '../lib/time.ts';
 
 const store = new Store(chromeStorageArea());
 const sessionArea = chromeSessionArea();
-const activity = new ActivityLog(sessionArea, {
-  onError: (error) => {
-    console.warn('[review-ratio] cannot write the activity log', error);
-  },
-});
 /** Rows rendered at most; Copy as text includes every entry. */
 const MAX_ROWS = 500;
 
@@ -50,6 +50,24 @@ const buttons = {
   forget: el('forget', HTMLButtonElement),
   toggleToken: el('toggle-token', HTMLButtonElement),
 };
+const modeInputs = { app: el('mode-app', HTMLInputElement), pat: el('mode-pat', HTMLInputElement) };
+const app = {
+  panel: el('app-panel', HTMLDivElement),
+  patPanel: el('pat-panel', HTMLDivElement),
+  unavailable: el('app-unavailable', HTMLParagraphElement),
+  installLink: el('install-link', HTMLAnchorElement),
+  signedOut: el('app-signed-out', HTMLDivElement),
+  waiting: el('app-waiting', HTMLDivElement),
+  signedIn: el('app-signed-in', HTMLDivElement),
+  userCode: el('user-code', HTMLOutputElement),
+  verifyLink: el('verify-link', HTMLAnchorElement),
+  waitingHint: el('waiting-hint', HTMLParagraphElement),
+  login: el('signed-in-login', HTMLElement),
+  signIn: el('sign-in', HTMLButtonElement),
+  copyCode: el('copy-code', HTMLButtonElement),
+  cancel: el('cancel-sign-in', HTMLButtonElement),
+  signOut: el('sign-out', HTMLButtonElement),
+};
 const copyButton = el('copy-activity', HTMLButtonElement);
 const activityRows = el('activity-rows', HTMLTableSectionElement);
 const activitySummary = el('activity-summary', HTMLParagraphElement);
@@ -67,23 +85,91 @@ function setStatus(kind: 'ok' | 'error' | 'warn' | 'info', text: string): void {
   status.textContent = text;
 }
 
+/** What the worker last said about the sign-in; `null` until it answered. */
+let authStatus: AuthStatus | null = null;
+/** Set by Cancel, so that the end of the flow does not read as a worker restart. */
+let cancelled = false;
+
+function selectedMode(): AuthMode {
+  return modeInputs.app.checked ? 'app' : 'pat';
+}
+
+/** The settings as the form says; the token only in token mode. */
 function readForm(): Settings {
+  const authMode = selectedMode();
   return {
-    token: tokenInput.value.trim(),
+    authMode,
+    token: authMode === 'pat' ? tokenInput.value.trim() : '',
     org: orgInput.value.trim() || DEFAULT_SETTINGS.org,
     excludedRepos: parseExcludeList(excludedInput.value),
   };
+}
+
+function showOrg(org: string): void {
+  el('org-hint', HTMLElement).textContent = org;
+  el('org-hint-app', HTMLElement).textContent = org;
 }
 
 function fillForm(settings: Settings): void {
   tokenInput.value = settings.token;
   orgInput.value = settings.org;
   excludedInput.value = settings.excludedRepos.join('\n');
-  el('org-hint', HTMLElement).textContent = settings.org;
+  showOrg(settings.org);
+}
+
+function showMode(mode: AuthMode): void {
+  modeInputs[mode].checked = true;
+  app.panel.hidden = mode !== 'app';
+  app.patPanel.hidden = mode !== 'pat';
 }
 
 async function send(request: Request): Promise<Response> {
   return chrome.runtime.sendMessage<Request, Response>(request);
+}
+
+/**
+ * Shows the sign-in as the worker reports it, and says what changed since the last report. The
+ * first report also picks the radio: the stored mode, or the app for a fresh install.
+ */
+function renderAuth(next: AuthStatus, initial: boolean): void {
+  const before = authStatus?.flow.state ?? 'idle';
+  authStatus = next;
+  modeInputs.app.disabled = !next.appConfigured;
+  app.unavailable.hidden = next.appConfigured;
+  app.installLink.href = next.installUrl;
+  if (initial) {
+    const preferApp = next.mode === 'app' || !tokenInput.value;
+    showMode(next.appConfigured && preferApp ? 'app' : 'pat');
+  }
+  const { flow } = next;
+  const waiting = flow.state === 'waiting';
+  app.waiting.hidden = !waiting;
+  app.signedIn.hidden = waiting || next.signedIn === null;
+  app.signedOut.hidden = waiting || next.signedIn !== null;
+  app.login.textContent = next.signedIn?.login ?? 'your GitHub account';
+  if (flow.state === 'waiting') {
+    app.userCode.value = flow.userCode;
+    app.verifyLink.href = flow.verificationUri;
+    app.waitingHint.textContent = `Waiting for GitHub… The code works until ${localClock(flow.expiresAt)}. This page can be closed: the sign-in goes on.`;
+  }
+  if (initial || flow.state === before) return;
+  // The code is on screen: "Asking GitHub for a code…" is over.
+  if (flow.state === 'waiting') status.textContent = '';
+  if (flow.state === 'failed') setStatus('error', flow.message);
+  if (flow.state === 'idle' && before === 'waiting' && !next.signedIn && !cancelled) {
+    setStatus('warn', 'The sign-in stopped: the extension restarted. Sign in again.');
+  }
+  cancelled = false;
+  if (flow.state === 'signed_in') {
+    void busy(app.signIn, () =>
+      refreshBadge(`Signed in as ${flow.login ?? 'your GitHub account'}. `),
+    );
+  }
+}
+
+async function loadAuth(initial = false): Promise<void> {
+  const response = await send({ type: 'auth:status' });
+  if (response.type === 'auth') renderAuth(response.status, initial);
 }
 
 function describeCache(cache: BadgeCache): void {
@@ -133,7 +219,7 @@ async function showDiagnostics(): Promise<void> {
 }
 
 async function busy<T>(button: HTMLButtonElement, task: () => Promise<T>): Promise<T | undefined> {
-  const all = Object.values(buttons);
+  const all = [...Object.values(buttons), app.signIn, app.signOut, app.cancel];
   for (const b of all) b.disabled = true;
   try {
     return await task();
@@ -142,20 +228,17 @@ async function busy<T>(button: HTMLButtonElement, task: () => Promise<T>): Promi
     return undefined;
   } finally {
     for (const b of all) b.disabled = false;
-    button.focus();
+    // The button may be hidden by now, e.g. Sign in once the code shows.
+    if (!button.closest('[hidden]')) button.focus();
   }
 }
 
 async function testConnection(settings: Settings): Promise<void> {
-  activity.event('Test connection, on the options page');
-  try {
-    const { ok, lines } = await diagnose(
-      settings,
-      loggingFetch((input, init) => fetch(input, init), activity),
-    );
-    setStatus(ok ? 'ok' : 'warn', lines.join('\n'));
-  } finally {
-    await activity.flush();
+  const response = await send({ type: 'connection:test', settings });
+  if (response.type === 'diagnosis') {
+    setStatus(response.ok ? 'ok' : 'warn', response.lines.join('\n'));
+  } else if (response.type === 'error') {
+    setStatus('error', response.message);
   }
 }
 
@@ -258,16 +341,33 @@ function formProblem(settings: Settings): string | null {
   return isValidOrg(settings.org) ? null : `"${settings.org}" is not a GitHub organisation name.`;
 }
 
-/** Saves valid settings, refreshes the badge with them, and reports the result. */
+/**
+ * Saves valid settings, refreshes the badge with them, and reports the result. Saving token mode
+ * forgets the app sign-in. App mode takes over when the sign-in ends, not on Save: until then the
+ * stored token stays in use.
+ */
 async function saveAndRefresh(prefix: string): Promise<void> {
-  const settings = readForm();
+  let settings = readForm();
   const problem = formProblem(settings);
   if (problem) {
     setStatus('error', `Not saved. ${problem}`);
     return;
   }
+  if (settings.authMode === 'app' && !authStatus?.signedIn) {
+    const stored = await store.getSettings();
+    settings = { ...settings, authMode: stored.authMode, token: stored.token };
+  }
+  if (settings.authMode === 'pat' && authStatus?.signedIn) {
+    const response = await send({ type: 'auth:sign-out' });
+    if (response.type === 'auth') renderAuth(response.status, false);
+  }
   await store.setSettings(settings);
   fillForm(await store.getSettings());
+  await refreshBadge(prefix);
+}
+
+/** Refreshes the badge now and reports the result. */
+async function refreshBadge(prefix: string): Promise<void> {
   setStatus('info', `${prefix}Refreshing the badge…`);
   // Pushed to the open GitHub tabs too.
   const response = await send({ type: 'badge:refresh' });
@@ -280,6 +380,15 @@ async function saveAndRefresh(prefix: string): Promise<void> {
     setStatus('error', `${prefix}${response.message}`);
   }
   await showDiagnostics();
+}
+
+/** Runs a sign-in step in the worker and shows its outcome. */
+function authStep(button: HTMLButtonElement, request: Request): void {
+  void busy(button, async () => {
+    const response = await send(request);
+    if (response.type === 'auth') renderAuth(response.status, false);
+    else if (response.type === 'error') setStatus('error', response.message);
+  });
 }
 
 form.addEventListener('submit', (event) => {
@@ -312,6 +421,43 @@ buttons.forget.addEventListener('click', () => {
     await showPlacement();
     await showActivity();
   });
+});
+
+for (const input of Object.values(modeInputs)) {
+  input.addEventListener('change', () => {
+    showMode(selectedMode());
+    status.textContent = '';
+  });
+}
+
+app.signIn.addEventListener('click', () => {
+  setStatus('info', 'Asking GitHub for a code…');
+  authStep(app.signIn, { type: 'auth:start' });
+});
+
+app.cancel.addEventListener('click', () => {
+  cancelled = true;
+  setStatus('info', 'Sign-in cancelled.');
+  authStep(app.cancel, { type: 'auth:cancel' });
+});
+
+app.signOut.addEventListener('click', () => {
+  void busy(app.signOut, async () => {
+    const response = await send({ type: 'auth:sign-out' });
+    if (response.type === 'auth') renderAuth(response.status, false);
+    await refreshBadge('Signed out. ');
+  });
+});
+
+app.copyCode.addEventListener('click', () => {
+  navigator.clipboard.writeText(app.userCode.value).then(
+    () => {
+      setStatus('info', 'Code copied. Paste it on GitHub.');
+    },
+    (error: unknown) => {
+      setStatus('error', `Cannot copy: ${error instanceof Error ? error.message : String(error)}`);
+    },
+  );
 });
 
 copyButton.addEventListener('click', () => {
@@ -353,6 +499,15 @@ payload.close.addEventListener('click', () => {
 chrome.storage.session.onChanged.addListener(scheduleActivity);
 setInterval(scheduleActivity, 15_000);
 
+// The worker publishes each step of the sign-in. While waiting, the page also checks that the
+// worker still runs it: a worker that stopped forgets the sign-in.
+chrome.storage.session.onChanged.addListener((changes) => {
+  if (FLOW_KEY in changes) void loadAuth();
+});
+setInterval(() => {
+  if (authStatus?.flow.state === 'waiting') void loadAuth();
+}, 15_000);
+
 buttons.toggleToken.addEventListener('click', () => {
   const show = tokenInput.type === 'password';
   tokenInput.type = show ? 'text' : 'password';
@@ -361,11 +516,12 @@ buttons.toggleToken.addEventListener('click', () => {
 });
 
 orgInput.addEventListener('input', () => {
-  el('org-hint', HTMLElement).textContent = orgInput.value.trim() || DEFAULT_SETTINGS.org;
+  showOrg(orgInput.value.trim() || DEFAULT_SETTINGS.org);
 });
 
 void (async () => {
   fillForm(await store.getSettings());
+  await loadAuth(true);
   await showDiagnostics();
   await showPlacement();
   await showActivity();

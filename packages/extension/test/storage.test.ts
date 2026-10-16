@@ -20,6 +20,29 @@ describe('Store', () => {
     expect(await store.getPrKeys()).toEqual({});
     expect(await store.getViewedSnapshots()).toEqual({});
     expect(await store.getCompareCache()).toEqual({});
+    expect(await store.getAppAuth()).toBeNull();
+  });
+
+  it('keeps the app sign-in apart from the activity, until signed out', async () => {
+    const area = memoryStorage({ appAuth: { accessToken: '' } });
+    const store = new Store(area);
+    expect(await store.getAppAuth()).toBeNull();
+    const signedIn = {
+      accessToken: 'ghu_a',
+      accessTokenExpiresAt: 1,
+      refreshToken: null,
+      refreshTokenExpiresAt: null,
+      login: null,
+    };
+    await store.setAppAuth(signedIn);
+    expect(await store.getAppAuth()).toEqual(signedIn);
+    await store.clearActivity();
+    await store.migrate();
+    expect(await store.getAppAuth()).toEqual(signedIn);
+    await area.set({ appAuth: { ...signedIn, refreshToken: 3 } });
+    expect(await store.getAppAuth()).toBeNull();
+    await store.clearAppAuth();
+    expect(area.data).not.toHaveProperty('appAuth');
   });
 
   it('round-trips every key', async () => {

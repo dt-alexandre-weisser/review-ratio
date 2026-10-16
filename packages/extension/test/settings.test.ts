@@ -42,7 +42,14 @@ describe('coerceSettings', () => {
         excludedRepos: ['A', 1],
         serverUrl: 'https://x/',
       }),
-    ).toEqual({ token: 't', org: 'Acme', excludedRepos: ['a'] });
+    ).toEqual({ authMode: 'pat', token: 't', org: 'Acme', excludedRepos: ['a'] });
+  });
+
+  it('keeps the app mode, and reads anything else as the token mode', () => {
+    expect(coerceSettings({ authMode: 'app' }).authMode).toBe('app');
+    expect(coerceSettings({ authMode: 'oauth' }).authMode).toBe('pat');
+    // Settings saved before the app mode existed have a token and no mode.
+    expect(coerceSettings({ token: 't' }).authMode).toBe('pat');
   });
 });
 

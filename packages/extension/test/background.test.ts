@@ -148,6 +148,115 @@ describe('background worker', () => {
     expect(await send({ ...placed, header: 'Send your token to "x"' }, fromGitHub)).toBeUndefined();
   });
 
+  it('runs the GitHub sign-in for the options page only, and publishes each step', async () => {
+    expect(await send({ type: 'auth:status' }, fromGitHub)).toEqual({
+      type: 'error',
+      message: 'not allowed',
+    });
+    expect(await send({ type: 'auth:status' }, fromOptions)).toEqual({
+      type: 'auth',
+      status: {
+        appConfigured: true,
+        installUrl: 'https://github.com/apps/review-ratio/installations/new',
+        mode: 'pat',
+        signedIn: null,
+        flow: { state: 'idle' },
+      },
+    });
+    // The stubbed fetch is offline: no call reaches GitHub.
+    const started = await send({ type: 'auth:start' }, fromOptions);
+    expect(started).toMatchObject({ type: 'auth', status: { flow: { state: 'failed' } } });
+    expect(session.data['authFlow']).toEqual({
+      state: 'failed',
+      message: 'GitHub cannot be reached. Check the connection, then sign in again.',
+    });
+    expect(await send({ type: 'auth:cancel' }, fromOptions)).toMatchObject({
+      status: { flow: { state: 'idle' } },
+    });
+    expect(await send({ type: 'auth:sign-out' }, fromOptions)).toMatchObject({
+      status: { signedIn: null, flow: { state: 'idle' } },
+    });
+    expect(session.data['authFlow']).toEqual({ state: 'idle' });
+  });
+
+  it('tests the connection with the form settings, in the worker', async () => {
+    const settings = { authMode: 'pat', token: 'github_pat_form', org: 'DiliTrust' };
+    expect(await send({ type: 'connection:test', settings }, fromGitHub)).toEqual({
+      type: 'error',
+      message: 'not allowed',
+    });
+    const pat = await send({ type: 'connection:test', settings }, fromOptions);
+    expect(pat).toEqual({
+      type: 'diagnosis',
+      ok: false,
+      lines: ['GitHub: unreachable (Failed to fetch).'],
+    });
+    const app = await send(
+      { type: 'connection:test', settings: { ...settings, authMode: 'app' } },
+      fromOptions,
+    );
+    expect(app).toEqual({ type: 'diagnosis', ok: false, lines: ['GitHub: not signed in yet.'] });
+    const entries = await readActivity(session, Date.now());
+    expect(entries.map((e) => (e.kind === 'event' ? e.message : null))).toContain(
+      'Test connection, asked by the options page',
+    );
+    expect(JSON.stringify(session.data)).not.toContain('github_pat_form');
+  });
+
+  it('uses the app token, renewed first when due, to test the connection', async () => {
+    await chromeMock.storage.local.set({
+      settings: { authMode: 'app', token: '', org: 'DiliTrust' },
+      appAuth: {
+        accessToken: 'ghu_live',
+        accessTokenExpiresAt: Date.now() + 3_600_000,
+        refreshToken: 'ghr_live',
+        refreshTokenExpiresAt: null,
+        login: 'me',
+      },
+    });
+    const app = await send(
+      { type: 'connection:test', settings: { authMode: 'app', org: 'DiliTrust' } },
+      fromOptions,
+    );
+    expect(app).toEqual({
+      type: 'diagnosis',
+      ok: false,
+      lines: ['GitHub: unreachable (Failed to fetch).'],
+    });
+    expect(await send({ type: 'auth:status' }, fromOptions)).toMatchObject({
+      status: { mode: 'app', signedIn: { login: 'me' } },
+    });
+    // Signed in, a new install does not open the options page.
+    chromeMock.runtime.openOptionsPage.mockClear();
+    listeners.installed[0]!({ reason: 'install' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(chromeMock.runtime.openOptionsPage).not.toHaveBeenCalled();
+    await send({ type: 'auth:sign-out' }, fromOptions);
+    expect(storage.data).not.toHaveProperty('appAuth');
+    await chromeMock.storage.local.set({ settings: {} });
+  });
+
+  it('tests the connection with the stored app token when GitHub cannot renew it', async () => {
+    await chromeMock.storage.local.set({
+      settings: { authMode: 'app', token: '', org: 'DiliTrust' },
+      appAuth: {
+        accessToken: 'ghu_due',
+        accessTokenExpiresAt: Date.now() - 1,
+        refreshToken: 'ghr_due',
+        refreshTokenExpiresAt: Date.now() + 3_600_000,
+        login: 'me',
+      },
+    });
+    const app = await send(
+      { type: 'connection:test', settings: { authMode: 'app', org: 'DiliTrust' } },
+      fromOptions,
+    );
+    expect(app).toMatchObject({ ok: false, lines: ['GitHub: unreachable (Failed to fetch).'] });
+    expect((storage.data['appAuth'] as { accessToken: string }).accessToken).toBe('ghu_due');
+    await send({ type: 'auth:sign-out' }, fromOptions);
+    await chromeMock.storage.local.set({ settings: {} });
+  });
+
   it('ignores messages that are not requests', async () => {
     expect(await send({ type: 'hello' }, fromOptions)).toBeUndefined();
   });

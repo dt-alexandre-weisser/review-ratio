@@ -23,6 +23,20 @@ describe('isTrustedFor', () => {
     expect(isTrustedFor({ type: 'cache:get' }, github, ID, ORIGIN)).toBe(false);
   });
 
+  it('keeps the GitHub sign-in and Test connection to the options page', () => {
+    const requests = [
+      { type: 'auth:status' },
+      { type: 'auth:start' },
+      { type: 'auth:cancel' },
+      { type: 'auth:sign-out' },
+      { type: 'connection:test', settings: {} },
+    ] as const;
+    for (const request of requests) {
+      expect(isTrustedFor(request, options, ID, ORIGIN)).toBe(true);
+      expect(isTrustedFor(request, github, ID, ORIGIN)).toBe(false);
+    }
+  });
+
   it('refuses other extensions and other pages', () => {
     expect(isTrustedFor({ type: 'badge:get' }, { ...options, id: 'other' }, ID, ORIGIN)).toBe(
       false,

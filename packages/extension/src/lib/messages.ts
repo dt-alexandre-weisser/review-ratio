@@ -1,3 +1,4 @@
+import type { AuthStatus } from './auth/sign-in.ts';
 import type { BadgeView } from './badge-state.ts';
 import type { BadgeCache } from './storage.ts';
 
@@ -21,11 +22,25 @@ export type Request =
   /** The options page asks for a refresh now. */
   | { type: 'badge:refresh' }
   /** The options page asks for the raw cache, to show diagnostics. */
-  | { type: 'cache:get' };
+  | { type: 'cache:get' }
+  /** The options page asks how the extension signs in to GitHub, and how a sign-in is going. */
+  | { type: 'auth:status' }
+  /** The options page starts "Sign in with GitHub". */
+  | { type: 'auth:start' }
+  | { type: 'auth:cancel' }
+  /** Forgets the GitHub App sign-in: Sign out, or a pasted token replacing it. */
+  | { type: 'auth:sign-out' }
+  /**
+   * Test connection, with the settings of the form (not saved yet). In app mode the worker uses
+   * its own token: only the worker renews it.
+   */
+  | { type: 'connection:test'; settings: unknown };
 
 export type Response =
   | { type: 'badge:view'; view: BadgeView }
   | { type: 'cache'; cache: BadgeCache }
+  | { type: 'auth'; status: AuthStatus }
+  | { type: 'diagnosis'; ok: boolean; lines: string[] }
   | { type: 'ok' }
   | { type: 'error'; message: string };
 
@@ -35,9 +50,19 @@ export interface BadgeUpdate {
   view: BadgeView;
 }
 
+const SIMPLE: ReadonlySet<string> = new Set([
+  'badge:get',
+  'badge:refresh',
+  'cache:get',
+  'auth:status',
+  'auth:start',
+  'auth:cancel',
+  'auth:sign-out',
+]);
+
 export function isRequest(value: unknown): value is Request {
   if (typeof value !== 'object' || value === null) return false;
-  const v = value as { type?: unknown; placement?: unknown; header?: unknown };
+  const v = value as { type?: unknown; placement?: unknown; header?: unknown; settings?: unknown };
   if (v.type === 'badge:placed') {
     return (
       (v.placement === 'header' || v.placement === 'floating') &&
@@ -46,7 +71,8 @@ export function isRequest(value: unknown): value is Request {
       HEADER_TEXT.test(v.header)
     );
   }
-  return v.type === 'badge:get' || v.type === 'badge:refresh' || v.type === 'cache:get';
+  if (v.type === 'connection:test') return typeof v.settings === 'object' && v.settings !== null;
+  return typeof v.type === 'string' && SIMPLE.has(v.type);
 }
 
 export function isBadgeUpdate(value: unknown): value is BadgeUpdate {

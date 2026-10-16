@@ -9,7 +9,14 @@ describe('message guards', () => {
     expect(isRequest({ type: 'badge:get' })).toBe(true);
     expect(isRequest({ type: 'badge:refresh' })).toBe(true);
     expect(isRequest({ type: 'cache:get' })).toBe(true);
+    for (const type of ['auth:status', 'auth:start', 'auth:cancel', 'auth:sign-out']) {
+      expect(isRequest({ type })).toBe(true);
+    }
+    expect(isRequest({ type: 'connection:test', settings: { token: 't' } })).toBe(true);
+    expect(isRequest({ type: 'connection:test' })).toBe(false);
+    expect(isRequest({ type: 'connection:test', settings: null })).toBe(false);
     expect(isRequest({ type: 'settings:steal' })).toBe(false);
+    expect(isRequest({ type: 3 })).toBe(false);
     expect(isRequest({ type: 'badge:placed', placement: 'header', header: '' })).toBe(true);
     expect(
       isRequest({

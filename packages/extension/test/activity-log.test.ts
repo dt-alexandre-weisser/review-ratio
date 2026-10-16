@@ -16,6 +16,7 @@ import {
   describeBody,
   displayUrl,
   formatDuration,
+  isCredentialCall,
   loggingFetch,
   readActivity,
   rowOf,
@@ -269,6 +270,34 @@ describe('loggingFetch', () => {
       ['GET', 'https://github.com/DiliTrust/app/pull/12/files', null],
       ['POST', 'https://api.github.com/x', '9 B sent'],
     ]);
+  });
+
+  it('keeps no body of a github.com/login call, which holds codes and tokens', async () => {
+    const { area, log, now } = setup();
+    const fetchLogged = loggingFetch(
+      () => Promise.resolve(Response.json({ access_token: 'ghu_secret' })),
+      log,
+      now,
+    );
+    // A string body, which other calls keep: login calls never send one, and still nothing is kept.
+    await fetchLogged('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      body: 'refresh_token=ghr_secret',
+    });
+    await fetchLogged('https://github.com/login/device/code', {
+      method: 'POST',
+      body: new URLSearchParams({ client_id: 'Iv1.x' }),
+    });
+    await log.flush();
+    const calls = (await readActivity(area, now())).reverse() as CallEntry[];
+    expect(calls.map((c) => [c.method, c.url, c.detail, c.status, c.body])).toEqual([
+      ['POST', 'https://github.com/login/oauth/access_token', null, 200, null],
+      ['POST', 'https://github.com/login/device/code', null, 200, null],
+    ]);
+    expect(JSON.stringify(area.data)).not.toMatch(/ghr_secret|ghu_secret/);
+    expect(isCredentialCall('https://github.com/login/device/code')).toBe(true);
+    expect(isCredentialCall('https://github.com/DiliTrust/app/pull/1')).toBe(false);
+    expect(isCredentialCall('https://api.github.com/login/x')).toBe(false);
   });
 
   it('logs a call that got no answer, and still fails it', async () => {

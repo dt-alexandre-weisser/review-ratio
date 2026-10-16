@@ -26,5 +26,12 @@ First prototype.
 - No badge flicker between pages: the badge is placed as soon as GitHub's React header is ready
   and put back before the next paint when GitHub replaces the header. Refreshes at most every 5
   minutes (the design said 10), from the cache in between.
+- Sign in with GitHub, recommended: the review-ratio GitHub App through the device flow, run by
+  the background worker. The options page shows the code and a link to GitHub, and switches to
+  "Signed in as …" by itself. The 8-hour token renews itself (5 minutes before expiry, or once
+  after a 401); a refused or expired refresh token signs out and the badge asks to set up. Only
+  the app's public client ID ships: no client secret, no private key. Pasting a token stays
+  available. Test connection runs in the worker and, with the app, checks that it is installed on
+  the organisation. The sign-in calls are logged without what they sent or received.
 - CI: format, lint, typecheck (scripts included), unit and formula tests with coverage
   thresholds, build, end-to-end tests in Chromium.

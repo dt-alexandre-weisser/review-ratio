@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   GitHubAuthError,
@@ -7,6 +7,7 @@ import {
   createGitHubClient,
   normalizeLogin,
   readyPeriodsOf,
+  staticToken,
 } from '../src/lib/github/client.ts';
 import { fakeFetch, json } from './helpers/fetch.ts';
 
@@ -142,6 +143,48 @@ describe('createGitHubClient', () => {
     const abuseError = (await abuse.viewer().catch((e: unknown) => e)) as GitHubRateLimitError;
     expect(abuseError).toBeInstanceOf(GitHubRateLimitError);
     expect(abuseError.resetAtMs).toBeGreaterThanOrEqual(before + 30_000);
+  });
+
+  it('asks the token source for each call, and renews once after a 401', async () => {
+    let current = 'ghu_old';
+    const source = {
+      getAccessToken: vi.fn(() => Promise.resolve(current)),
+      renewAfterUnauthorized: vi.fn((rejected: string) => {
+        expect(rejected).toBe('ghu_old');
+        current = 'ghu_new';
+        return Promise.resolve<string | null>(current);
+      }),
+      hasCredential: () => Promise.resolve(true),
+    };
+    const fetchImpl = fakeFetch((_url, init) =>
+      (init.headers as Record<string, string>)['authorization'] === 'Bearer ghu_new'
+        ? json({ login: 'me' })
+        : json({}, { status: 401 }),
+    );
+    const client = createGitHubClient({ auth: source, fetchImpl });
+    expect(await client.viewer()).toEqual({ login: 'me' });
+    expect(await client.viewer()).toEqual({ login: 'me' });
+    expect(source.renewAfterUnauthorized).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.calls).toHaveLength(3);
+  });
+
+  it('fails as unauthorized without a token, or when the renewed token is refused too', async () => {
+    const none = createGitHubClient({
+      auth: staticToken(''),
+      fetchImpl: fakeFetch(() => json({})),
+    });
+    await expect(none.viewer()).rejects.toBeInstanceOf(GitHubAuthError);
+    const renewed = {
+      getAccessToken: () => Promise.resolve('a'),
+      renewAfterUnauthorized: () => Promise.resolve<string | null>('b'),
+      hasCredential: () => Promise.resolve(true),
+    };
+    const fetchImpl = fakeFetch(() => json({}, { status: 401 }));
+    const client = createGitHubClient({ auth: renewed, fetchImpl });
+    await expect(client.viewer()).rejects.toBeInstanceOf(GitHubAuthError);
+    expect(fetchImpl.calls).toHaveLength(2);
+    expect(await staticToken('t').renewAfterUnauthorized('t')).toBeNull();
+    expect(await staticToken('').hasCredential()).toBe(false);
   });
 
   it('wraps network failures and other errors', async () => {
