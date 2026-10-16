@@ -1,12 +1,16 @@
+import type { LogArea } from '../../src/lib/activity-log.ts';
 import type { StorageArea } from '../../src/lib/storage.ts';
 
-/** An in-memory `chrome.storage.local` that round-trips through JSON like the real one. */
+/** An in-memory `chrome.storage` area that round-trips through JSON like the real one. */
 export function memoryStorage(
   initial: Record<string, unknown> = {},
-): StorageArea & { data: Record<string, unknown> } {
+): StorageArea & LogArea & { data: Record<string, unknown> } {
   const data: Record<string, unknown> = structuredClone(initial);
   return {
     data,
+    getKeys() {
+      return Promise.resolve(Object.keys(data));
+    },
     get(keys) {
       const out: Record<string, unknown> = {};
       for (const key of keys) if (key in data) out[key] = structuredClone(data[key]);

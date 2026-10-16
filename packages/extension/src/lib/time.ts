@@ -33,3 +33,9 @@ export function localClock(ms: number): string {
   const mm = String(d.getMinutes()).padStart(2, '0');
   return `${hh}:${mm}`;
 }
+
+/** `HH:MM:SS` in the user's local time, for the activity log. */
+export function localTime(ms: number): string {
+  const d = new Date(ms);
+  return `${localClock(ms)}:${String(d.getSeconds()).padStart(2, '0')}`;
+}

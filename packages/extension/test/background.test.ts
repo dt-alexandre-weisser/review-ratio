@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { readActivity, type CallEntry } from '../src/lib/activity-log.ts';
 import type { Response } from '../src/lib/messages.ts';
 import { memoryStorage } from './helpers/memory-storage.ts';
 
@@ -12,6 +13,7 @@ const listeners: Record<'message' | 'installed' | 'clicked', Listener[]> = {
   clicked: [],
 };
 const storage = memoryStorage();
+const session = memoryStorage();
 const accessLevels: unknown[] = [];
 const chromeMock = {
   runtime: {
@@ -30,6 +32,7 @@ const chromeMock = {
         return Promise.resolve();
       },
     },
+    session,
   },
   tabs: {
     query: vi.fn(() => Promise.resolve([{ id: 7 }, {}])),
@@ -146,5 +149,27 @@ describe('background worker refresh queue', () => {
     expect(forced).toMatchObject({ type: 'badge:view', view: { stale: true } });
     const cache = await send({ type: 'cache:get' }, fromOptions);
     expect(cache).toMatchObject({ type: 'cache', cache: { status: 'stale' } });
+  });
+
+  it('logs each refresh and each call it made, with the token kept out', async () => {
+    await chromeMock.storage.local.set({
+      badge: {},
+      settings: { token: 'github_pat_secret', serverUrl: 'http://127.0.0.1:1' },
+    });
+    await send({ type: 'badge:refresh' }, fromOptions);
+    // The worker writes the log when the refresh ends.
+    const entries = (await readActivity(session, Date.now())).reverse();
+    const lines = entries.map((e) =>
+      e.kind === 'event' ? e.message : `${e.method} ${e.url} ${e.status ?? 'failed'}`,
+    );
+    const last = lines.lastIndexOf('refresh started (asked by the options page)');
+    expect(lines.slice(last)).toEqual([
+      'refresh started (asked by the options page)',
+      'GET http://127.0.0.1:1/classes failed',
+      expect.stringMatching(/^refresh failed: /),
+    ]);
+    const call = entries.find((e): e is CallEntry => e.kind === 'call');
+    expect(call?.error).toBeTruthy();
+    expect(JSON.stringify(session.data)).not.toContain('github_pat_secret');
   });
 });

@@ -21,6 +21,10 @@ export interface RefreshDeps {
   log?: (message: string) => void;
 }
 
+function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
 /** A GitHub rate limit never asks to wait longer than this; a later date comes from a clock jump. */
 const MAX_BACKOFF_MS = 60 * 60 * 1000;
 
@@ -46,17 +50,20 @@ export function isRefreshDue(cache: BadgeCache, nowMs: number): boolean {
 
 export async function refreshIfDue(
   deps: RefreshDeps,
+  reason?: string,
 ): Promise<{ cache: BadgeCache; refreshed: boolean }> {
   const cache = await deps.store.getBadge();
   if (!isRefreshDue(cache, deps.now())) return { cache, refreshed: false };
-  return { cache: await refresh(deps), refreshed: true };
+  return { cache: await refresh(deps, reason), refreshed: true };
 }
 
-export async function refresh(deps: RefreshDeps): Promise<BadgeCache> {
+/** `reason` says what asked for the refresh, for the log. */
+export async function refresh(deps: RefreshDeps, reason?: string): Promise<BadgeCache> {
   const { store } = deps;
   await store.migrate();
   const settings = await store.getSettings();
   if (!settings.token) {
+    deps.log?.('refresh skipped: no GitHub token yet');
     return store.updateBadge({
       status: 'no_token',
       error: null,
@@ -66,6 +73,7 @@ export async function refresh(deps: RefreshDeps): Promise<BadgeCache> {
   }
 
   const startedAt = deps.now();
+  deps.log?.(`refresh started${reason ? ` (${reason})` : ''}`);
   const before = await store.getBadge();
   await store.updateBadge({
     refreshStartedAt: startedAt,
@@ -98,8 +106,8 @@ export async function refresh(deps: RefreshDeps): Promise<BadgeCache> {
     const payload = buildPayload(collected.up, collected.down);
     const score = await server.score(payload);
     deps.log?.(
-      `refreshed: ${payload.up.length} reviews, ${payload.down.length} PRs, ` +
-        `${collected.skipped} of ${collected.total} PRs skipped → ${JSON.stringify(score)}`,
+      `refreshed: ${plural(payload.up.length, 'review')}, ${plural(payload.down.length, 'own PR')}, ` +
+        `${collected.skipped} of ${plural(collected.total, 'PR')} skipped → ${JSON.stringify(score)}`,
     );
     return await store.updateBadge({
       status: 'ok',

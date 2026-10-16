@@ -165,6 +165,19 @@ question below.
   worker calls a cheap extension API every 20 seconds so Chrome does not stop it for idleness, and
   each GitHub request times out after 25 seconds, under Chrome's 30-second limit.
 
+### Activity log
+
+- Every `fetch` of the worker and of Test connection goes through a wrapper that records it
+  (`lib/activity-log.ts`), so the log cannot miss a call that a client forgot to report. Cached
+  compare results make no call and do not appear.
+- The log lives in `chrome.storage.session`: it should not outlive the browser session, and
+  content scripts cannot read that area.
+- Entries are buffered for 2 seconds and written as one batch under its own key. Writers (the
+  worker, any open options page) never read-modify-write a shared key, so none can overwrite
+  another. Batches older than 30 minutes, or beyond 300 batches, are dropped on every write;
+  the page also filters entries by time when it reads them.
+- Writing the log never fails a refresh: errors go to the worker console.
+
 ### Badge states
 
 | Status             | Cause                                   | Badge                                  |

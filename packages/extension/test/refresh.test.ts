@@ -128,9 +128,27 @@ describe('refresh', () => {
 
   it('does nothing but flag the badge without a token', async () => {
     const { deps, srv, store } = await setup({ token: '' });
+    const log = vi.fn();
     await store.updateBadge({ unfinishedRefreshes: 1 });
-    expect(await refresh(deps)).toMatchObject({ status: 'no_token', unfinishedRefreshes: 0 });
+    expect(await refresh({ ...deps, log })).toMatchObject({
+      status: 'no_token',
+      unfinishedRefreshes: 0,
+    });
     expect(srv.scored).toHaveLength(0);
+    expect(log.mock.calls).toEqual([['refresh skipped: no GitHub token yet']]);
+  });
+
+  it('logs why a refresh started and how it ended', async () => {
+    const { deps } = await setup();
+    const log = vi.fn();
+    await refresh({ ...deps, log }, 'asked by the options page');
+    await refresh({ ...deps, log });
+    expect(log.mock.calls.map(([line]) => line as string)).toEqual([
+      'refresh started (asked by the options page)',
+      expect.stringMatching(/^refreshed: 1 review, 0 own PRs, 0 of 1 PR skipped → \{"up":400/),
+      'refresh started',
+      expect.stringMatching(/^refreshed: /),
+    ]);
   });
 
   it('asks the server for the globs first, and spends no GitHub call when it is down', async () => {
@@ -250,5 +268,12 @@ describe('refreshIfDue', () => {
     advance(5 * 60_000);
     expect((await refreshIfDue(deps)).refreshed).toBe(true);
     expect(srv.scored).toHaveLength(2);
+  });
+
+  it('passes the reason on to the log', async () => {
+    const { deps } = await setup();
+    const log = vi.fn();
+    await refreshIfDue({ ...deps, log }, 'a github.com tab asked for the badge');
+    expect(log).toHaveBeenCalledWith('refresh started (a github.com tab asked for the badge)');
   });
 });

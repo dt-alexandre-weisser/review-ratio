@@ -1,6 +1,17 @@
 /**
- * Options page: the token, the scope, the server, and a few diagnostics.
+ * Options page: the token, the scope, the server, a few diagnostics and the activity log.
  */
+import {
+  ActivityLog,
+  chromeSessionArea,
+  clearActivity,
+  loggingFetch,
+  readActivity,
+  rowOf,
+  summarize,
+  toText,
+  type ActivityEntry,
+} from '../lib/activity-log.ts';
 import { diagnose } from '../lib/diagnose.ts';
 import type { Request, Response } from '../lib/messages.ts';
 import {
@@ -14,6 +25,14 @@ import {
 import { Store, chromeStorageArea, type BadgeCache } from '../lib/storage.ts';
 
 const store = new Store(chromeStorageArea());
+const sessionArea = chromeSessionArea();
+const activity = new ActivityLog(sessionArea, {
+  onError: (error) => {
+    console.warn('[review-ratio] cannot write the activity log', error);
+  },
+});
+/** Rows rendered at most; Copy as text includes every entry. */
+const MAX_ROWS = 500;
 
 function el<T extends HTMLElement>(id: string, kind: abstract new () => T): T {
   const node = document.getElementById(id);
@@ -34,6 +53,9 @@ const buttons = {
   forget: el('forget', HTMLButtonElement),
   toggleToken: el('toggle-token', HTMLButtonElement),
 };
+const copyButton = el('copy-activity', HTMLButtonElement);
+const activityRows = el('activity-rows', HTMLTableSectionElement);
+const activitySummary = el('activity-summary', HTMLParagraphElement);
 
 function setStatus(kind: 'ok' | 'error' | 'warn' | 'info', text: string): void {
   status.dataset['kind'] = kind;
@@ -92,8 +114,74 @@ async function busy<T>(button: HTMLButtonElement, task: () => Promise<T>): Promi
 }
 
 async function testConnection(settings: Settings): Promise<void> {
-  const { ok, lines } = await diagnose(settings);
-  setStatus(ok ? 'ok' : 'warn', lines.join('\n'));
+  activity.event('Test connection, on the options page');
+  try {
+    const { ok, lines } = await diagnose(
+      settings,
+      loggingFetch((input, init) => fetch(input, init), activity),
+    );
+    setStatus(ok ? 'ok' : 'warn', lines.join('\n'));
+  } finally {
+    await activity.flush();
+  }
+}
+
+let shownEntries: ActivityEntry[] = [];
+
+function activityRow(entry: ActivityEntry): HTMLTableRowElement {
+  const row = rowOf(entry);
+  const tr = document.createElement('tr');
+  tr.dataset['event'] = String(row.event);
+  tr.dataset['failed'] = String(row.failed);
+  const cell = (text: string) => {
+    const td = document.createElement('td');
+    td.textContent = text;
+    return td;
+  };
+  const what = cell(row.what);
+  if (row.event) {
+    what.colSpan = 3;
+    tr.append(cell(row.time), what);
+    return tr;
+  }
+  if (row.detail) {
+    const detail = document.createElement('span');
+    detail.className = 'detail';
+    detail.textContent = row.detail;
+    what.append(detail);
+  }
+  tr.append(cell(row.time), what, cell(row.result), cell(row.duration));
+  return tr;
+}
+
+async function showActivity(): Promise<void> {
+  const entries = await readActivity(sessionArea, Date.now());
+  shownEntries = entries;
+  activitySummary.textContent = summarize(entries);
+  const rows = entries.slice(0, MAX_ROWS).map(activityRow);
+  if (entries.length > MAX_ROWS) {
+    const more = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.textContent = `${entries.length - MAX_ROWS} older entries not shown. Copy as text includes them.`;
+    more.append(td);
+    rows.push(more);
+  }
+  activityRows.replaceChildren(...rows);
+}
+
+let activityQueued = false;
+
+/** Re-renders soon, once, however many batches land at the same time. */
+function scheduleActivity(): void {
+  if (activityQueued) return;
+  activityQueued = true;
+  setTimeout(() => {
+    activityQueued = false;
+    showActivity().catch((error: unknown) => {
+      activitySummary.textContent = `Cannot read the activity log: ${error instanceof Error ? error.message : String(error)}`;
+    });
+  }, 250);
 }
 
 /** Why the form cannot be used, or `null`. Save and Refresh both refuse invalid settings. */
@@ -146,13 +234,35 @@ buttons.refresh.addEventListener('click', () => {
 buttons.forget.addEventListener('click', () => {
   void busy(buttons.forget, async () => {
     await store.clearActivity();
+    await clearActivity(sessionArea);
     setStatus(
       'ok',
-      'Forgot the cached badge, class globs, PR keys and Viewed snapshots. Settings kept.',
+      'Forgot the cached badge, class globs, PR keys, Viewed snapshots and the activity log. Settings kept.',
     );
     await showDiagnostics();
+    await showActivity();
   });
 });
+
+copyButton.addEventListener('click', () => {
+  const text = toText(shownEntries);
+  if (!text) {
+    setStatus('info', 'The activity log is empty: nothing to copy.');
+    return;
+  }
+  navigator.clipboard.writeText(text).then(
+    () => {
+      setStatus('ok', `Copied ${shownEntries.length} activity log entries.`);
+    },
+    (error: unknown) => {
+      setStatus('error', `Cannot copy: ${error instanceof Error ? error.message : String(error)}`);
+    },
+  );
+});
+
+// New batches from the worker show up live; the interval ages out entries older than 30 minutes.
+chrome.storage.session.onChanged.addListener(scheduleActivity);
+setInterval(scheduleActivity, 15_000);
 
 buttons.toggleToken.addEventListener('click', () => {
   const show = tokenInput.type === 'password';
@@ -168,4 +278,5 @@ orgInput.addEventListener('input', () => {
 void (async () => {
   fillForm(await store.getSettings());
   await showDiagnostics();
+  await showActivity();
 })();

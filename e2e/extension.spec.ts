@@ -176,3 +176,37 @@ test('injects the content script into an open GitHub tab, as after an update', a
   await expect(github.locator('#review-ratio-badge')).toHaveAttribute('data-stale', 'true');
   await expect(github.locator('#review-ratio-badge')).toHaveCount(1);
 });
+
+test('lists the calls of the last 30 minutes on the options page', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context);
+  const options = await context.newPage();
+  // Saving refreshes the badge.
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+
+  const rows = options.locator('#activity-rows');
+  await expect(rows).toContainText('refresh started (asked by the options page)');
+  await expect(rows).toContainText('GET 127.0.0.1:8787/classes');
+  await expect(rows).toContainText('GET api.github.com/search/issues?q=is:pr');
+  await expect(rows).toContainText('POST api.github.com/graphql');
+  await expect(rows).toContainText(/PullRequest DiliTrust\/top-secret-repo#\d+/);
+  await expect(rows).toContainText('POST 127.0.0.1:8787/score');
+  await expect(rows).toContainText(/refreshed: \d+ reviews?/);
+  await expect(options.locator('#activity-summary')).toHaveText(
+    /^\d+ calls in the last 30 minutes: .*api\.github\.com.*127\.0\.0\.1:8787/,
+  );
+  // Newest first: the refresh's last line is on top.
+  await expect(rows.locator('tr').first()).toContainText(/refreshed: /);
+
+  await options.getByRole('button', { name: 'Test connection' }).click();
+  await expect(options.locator('#status')).toContainText('is up');
+  await expect(rows).toContainText('Test connection, on the options page');
+  await expect(rows).toContainText('GET api.github.com/user');
+  await expect(options.locator('#activity')).not.toContainText('github_pat_e2e');
+
+  await options.getByRole('button', { name: 'Forget local activity data' }).click();
+  await expect(options.locator('#activity-summary')).toHaveText('No calls in the last 30 minutes.');
+  await expect(rows.locator('tr')).toHaveCount(0);
+});

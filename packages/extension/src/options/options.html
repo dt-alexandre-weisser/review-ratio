@@ -96,6 +96,31 @@
           <dd id="diag-error">—</dd>
         </dl>
       </section>
+
+      <section aria-labelledby="activity-title">
+        <div class="section-head">
+          <h2 id="activity-title">Activity, last 30 minutes</h2>
+          <button type="button" id="copy-activity">Copy as text</button>
+        </div>
+        <p class="hint">
+          Every call this extension made, newest first. The badge refreshes when a github.com page
+          loads or comes back into view, at most every 10 minutes. The log stays in this browser's
+          memory and is gone when the browser closes. It shows repository names, so read it before
+          sharing it.
+        </p>
+        <p id="activity-summary">No calls in the last 30 minutes.</p>
+        <table id="activity">
+          <thead>
+            <tr>
+              <th scope="col">Time</th>
+              <th scope="col">Call</th>
+              <th scope="col">Status</th>
+              <th scope="col">Took</th>
+            </tr>
+          </thead>
+          <tbody id="activity-rows"></tbody>
+        </table>
+      </section>
     </main>
     <script src="options.js"></script>
   </body>

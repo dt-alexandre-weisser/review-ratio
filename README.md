@@ -78,6 +78,19 @@ The token stays in `chrome.storage.local` and is only sent to `api.github.com`.
 The badge refreshes on page load, at most once every 10 minutes. Clicking it does nothing. The
 options page has **Refresh badge now** and shows the last score and error.
 
+### Where the badge is
+
+In the top bar of github.com, on the right, first in the group of search box and icons. It needs
+GitHub's signed-in header: signed-out pages have none. Below 1,280 px of window width it shortens
+to `Ratio 1.49`, and below 768 px it hides, as GitHub's header has no room left.
+
+### Activity log
+
+The options page (toolbar icon, or **Details › Extension options** in `chrome://extensions`) lists
+every call the extension made in the last 30 minutes, newest first: time, method and URL, status,
+duration, and refresh start and end lines. It updates live and **Copy as text** copies it. The log
+stays in memory and is gone when the browser closes. See [SECURITY.md](SECURITY.md).
+
 ## Repository layout
 
 | Path                 | Content                                                                                |

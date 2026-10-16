@@ -4,7 +4,7 @@
 
 | Permission                                           | Why                                                                          |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `storage`                                            | Settings, the cached badge, PR keys, Viewed snapshots, compare cache         |
+| `storage`                                            | Settings, the cached badge, PR keys, Viewed snapshots, compare cache, log    |
 | `scripting`                                          | Put the badge back in GitHub tabs that were open during an install or update |
 | `https://api.github.com/*`                           | Read your reviews and PRs with your token                                    |
 | `https://github.com/*`                               | Show the badge in the header (content script)                                |
@@ -20,6 +20,19 @@
 - The background worker serves content scripts the badge and nothing else. Forcing a refresh and
   reading diagnostics are reserved for the extension's own pages. Web pages and other extensions
   cannot message it (no `externally_connectable`).
+
+## The activity log
+
+The options page lists every call the extension made in the last 30 minutes, to show what it
+does without DevTools.
+
+- Kept in `chrome.storage.session`: in memory only, gone when the browser closes, and out of reach
+  of content scripts.
+- Holds the time, method, URL, status and duration of each call, the GraphQL operation and PR it
+  read, and refresh start and end lines. URLs name repositories, PRs and your login, so the page
+  warns before you copy the log.
+- Never holds a header or a body, so never the token or the payload.
+- Cleared by **Forget local activity data**. Nothing in it leaves the browser.
 
 ## What leaves the browser
 

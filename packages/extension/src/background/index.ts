@@ -2,6 +2,7 @@
  * Background service worker. Owns the refresh: the content script only ever asks for the
  * badge, and the worker decides whether the cache is fresh enough.
  */
+import { ActivityLog, chromeSessionArea, loggingFetch } from '../lib/activity-log.ts';
 import { badgeView } from '../lib/badge-state.ts';
 import { createGitHubClient } from '../lib/github/client.ts';
 import { isRequest, type BadgeUpdate, type Request, type Response } from '../lib/messages.ts';
@@ -15,6 +16,13 @@ const KEEP_ALIVE_MS = 20_000;
 const GITHUB_TABS = 'https://github.com/*';
 
 const store = new Store(chromeStorageArea());
+const activity = new ActivityLog(chromeSessionArea(), {
+  onError: (error) => {
+    console.warn('[review-ratio] cannot write the activity log', error);
+  },
+});
+// Resolved at call time, so the worker always uses the current global fetch.
+const loggedFetch = loggingFetch((input, init) => fetch(input, init), activity);
 
 // The GitHub token lives in storage.local. Content scripts never need it: keep it out of reach
 // of a compromised github.com renderer.
@@ -25,11 +33,12 @@ chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch((
 const deps: RefreshDeps = {
   store,
   now: () => Date.now(),
-  github: (token) => createGitHubClient({ token }),
-  server: (baseUrl) => createServerClient(baseUrl),
+  github: (token) => createGitHubClient({ token, fetchImpl: loggedFetch }),
+  server: (baseUrl) => createServerClient(baseUrl, loggedFetch),
   randomUUID: () => crypto.randomUUID(),
   log: (message) => {
     console.info(`[review-ratio] ${message}`);
+    activity.event(message);
   },
 };
 
@@ -51,8 +60,10 @@ function enqueue(task: () => Promise<unknown>): Promise<void> {
       await task();
     } catch (error) {
       console.error('[review-ratio] refresh crashed', error);
+      activity.event(`refresh crashed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       clearInterval(keepAlive);
+      await activity.flush();
     }
   });
   queue = run;
@@ -86,7 +97,8 @@ function refreshInBackground(): void {
   backgroundQueued = true;
   void enqueue(async () => {
     backgroundQueued = false;
-    if ((await refreshIfDue(deps)).refreshed) await broadcastBadge();
+    const { refreshed } = await refreshIfDue(deps, 'a github.com tab asked for the badge');
+    if (refreshed) await broadcastBadge();
   });
 }
 
@@ -99,7 +111,7 @@ async function handle(request: Request): Promise<Response> {
     }
     case 'badge:refresh': {
       await enqueue(async () => {
-        await refresh(deps);
+        await refresh(deps, 'asked by the options page');
         await broadcastBadge();
       });
       return { type: 'badge:view', view: badgeView(await store.getBadge(), Date.now()) };
