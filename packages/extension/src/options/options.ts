@@ -5,12 +5,15 @@ import {
   ActivityLog,
   chromeSessionArea,
   clearActivity,
+  formatBody,
   loggingFetch,
   readActivity,
+  readQuery,
   rowOf,
   summarize,
   toText,
   type ActivityEntry,
+  type CallEntry,
 } from '../lib/activity-log.ts';
 import { diagnose } from '../lib/diagnose.ts';
 import { clearPlacement, readPlacement } from '../lib/placement.ts';
@@ -58,6 +61,14 @@ const buttons = {
 const copyButton = el('copy-activity', HTMLButtonElement);
 const activityRows = el('activity-rows', HTMLTableSectionElement);
 const activitySummary = el('activity-summary', HTMLParagraphElement);
+const payload = {
+  section: el('payload', HTMLElement),
+  title: el('payload-title', HTMLHeadingElement),
+  meta: el('payload-meta', HTMLParagraphElement),
+  text: el('payload-text', HTMLPreElement),
+  copy: el('copy-payload', HTMLButtonElement),
+  close: el('close-payload', HTMLButtonElement),
+};
 
 function setStatus(kind: 'ok' | 'error' | 'warn' | 'info', text: string): void {
   status.dataset['kind'] = kind;
@@ -184,8 +195,35 @@ function activityRow(entry: ActivityEntry): HTMLTableRowElement {
     detail.textContent = row.detail;
     what.append(detail);
   }
+  if (entry.kind === 'call' && entry.body) {
+    const view = document.createElement('button');
+    view.type = 'button';
+    view.className = 'view-payload';
+    view.textContent = 'View payload';
+    view.addEventListener('click', () => {
+      showPayload(entry).catch((error: unknown) => {
+        setStatus('error', `Cannot show the payload: ${String(error)}`);
+      });
+    });
+    what.append(view);
+  }
   tr.append(cell(row.time), what, cell(row.result), cell(row.duration));
   return tr;
+}
+
+/** Shows what a call sent, below the table: it stays open while new calls arrive. */
+async function showPayload(entry: CallEntry): Promise<void> {
+  if (!entry.body) return;
+  const query =
+    entry.body.kind === 'graphql' ? await readQuery(sessionArea, entry.body.queryId) : null;
+  const row = rowOf(entry);
+  payload.title.textContent = row.what;
+  payload.meta.textContent = [row.time, row.detail, `${row.result} in ${row.duration}`]
+    .filter(Boolean)
+    .join(' · ');
+  payload.text.textContent = formatBody(entry.body, query);
+  payload.section.hidden = false;
+  payload.section.scrollIntoView({ block: 'nearest' });
 }
 
 async function showActivity(): Promise<void> {
@@ -277,6 +315,7 @@ buttons.forget.addEventListener('click', () => {
     await store.clearActivity();
     await clearActivity(sessionArea);
     await clearPlacement(sessionArea);
+    payload.section.hidden = true;
     setStatus(
       'ok',
       'Forgot the cached badge, class globs, PR keys, Viewed snapshots and the activity log. Settings kept.',
@@ -305,6 +344,21 @@ copyButton.addEventListener('click', () => {
       setStatus('error', `Cannot copy: ${error instanceof Error ? error.message : String(error)}`);
     },
   );
+});
+
+payload.copy.addEventListener('click', () => {
+  navigator.clipboard.writeText(payload.text.textContent).then(
+    () => {
+      setStatus('ok', 'Copied the payload. It may name repositories and your login.');
+    },
+    (error: unknown) => {
+      setStatus('error', `Cannot copy: ${error instanceof Error ? error.message : String(error)}`);
+    },
+  );
+});
+
+payload.close.addEventListener('click', () => {
+  payload.section.hidden = true;
 });
 
 // New batches from the worker show up live; the interval ages out entries older than 30 minutes.

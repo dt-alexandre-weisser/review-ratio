@@ -4,8 +4,11 @@
  * without DevTools.
  *
  * It lives in `chrome.storage.session`: in memory, out of reach of content scripts, and gone when
- * the browser closes. It holds URLs, so repository names and PR numbers, but never a header and
- * so never the token. Nothing in it leaves the browser.
+ * the browser closes. It holds URLs and request bodies, so repository names, PR numbers and the
+ * user's login, but never a header and so never the token. Nothing in it leaves the browser.
+ *
+ * A GraphQL body is kept as its variables plus a reference to the query text, which is stored
+ * once under `activityQuery:<id>`: thousands of calls share three queries.
  *
  * Several contexts write it (the worker, and the options page for Test connection). Each flush
  * writes its own key, so writers never overwrite each other and no read-modify-write is needed.
@@ -23,7 +26,12 @@ export const MAX_BATCH_ENTRIES = 100;
  */
 export const MAX_ENTRIES = 5_000;
 const MAX_TEXT = 500;
+/** A request body other than GraphQL (the score payload) is kept up to this many characters. */
+export const MAX_BODY_TEXT = 64 * 1024;
+const MAX_VARIABLES = 2_000;
+const MAX_QUERY = 20_000;
 const KEY_PREFIX = 'activity:';
+const QUERY_PREFIX = 'activityQuery:';
 /** `activity:<flushed at, ms>:<entries>:<id>`: pruning needs no read of the batches. */
 const KEY = /^activity:(\d+):(\d+):[\w-]+$/;
 
@@ -41,7 +49,16 @@ export interface CallEntry {
   error: string | null;
   /** Time until the response headers arrived. */
   ms: number;
+  /** What was sent, to view on the options page. */
+  body: CallBody | null;
 }
+
+/** A request body as the log keeps it. */
+export type CallBody =
+  /** GraphQL: the query text is stored once under its id; the variables, as JSON, per call. */
+  | { kind: 'graphql'; queryId: string; variables: string }
+  /** Any other text, clipped to `MAX_BODY_TEXT`. */
+  | { kind: 'text'; text: string; truncated: boolean };
 
 export interface EventEntry {
   kind: 'event';
@@ -67,8 +84,31 @@ export interface ActivityLogOptions {
   onError?: (error: unknown) => void;
 }
 
-function clip(text: string): string {
-  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text;
+function clip(text: string, max = MAX_TEXT): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/** FNV-1a, 32 bits, in hex: a short, stable id for a query text. */
+export function queryIdOf(query: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < query.length; i++) {
+    hash ^= query.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+/** The query and variables of a GraphQL body, or `null` for any other body. */
+export function parseGraphql(body: string): { query: string; variables: unknown } | null {
+  if (!body.startsWith('{"query"')) return null;
+  try {
+    const parsed = JSON.parse(body) as { query?: unknown; variables?: unknown };
+    return typeof parsed.query === 'string'
+      ? { query: parsed.query, variables: parsed.variables ?? null }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 interface BatchKey {
@@ -87,6 +127,10 @@ function parseKey(key: string): BatchKey | null {
 /** Buffers entries and writes them to session storage in batches. */
 export class ActivityLog {
   private pending: ActivityEntry[] = [];
+  /** Query texts to write with the next batch, by id. */
+  private pendingQueries = new Map<string, string>();
+  /** Query ids this context already wrote. */
+  private readonly writtenQueries = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly now: () => number;
   private readonly randomId: () => string;
@@ -107,14 +151,33 @@ export class ActivityLog {
     this.record({ kind: 'event', at: this.now(), message: clip(message) });
   }
 
-  call(entry: Omit<CallEntry, 'kind'>): void {
+  /** Records a call and, when it had a text body, what was sent. */
+  call(entry: Omit<CallEntry, 'kind' | 'body'>, sent?: string): void {
     this.record({
       kind: 'call',
       ...entry,
       url: clip(entry.url),
       detail: entry.detail === null ? null : clip(entry.detail),
       error: entry.error === null ? null : clip(entry.error),
+      body: sent === undefined ? null : this.keep(sent),
     });
+  }
+
+  private keep(sent: string): CallBody {
+    const graphql = parseGraphql(sent);
+    if (!graphql) {
+      const truncated = sent.length > MAX_BODY_TEXT;
+      return { kind: 'text', text: truncated ? sent.slice(0, MAX_BODY_TEXT) : sent, truncated };
+    }
+    const queryId = queryIdOf(graphql.query);
+    if (!this.writtenQueries.has(queryId)) {
+      this.pendingQueries.set(queryId, clip(graphql.query, MAX_QUERY));
+    }
+    return {
+      kind: 'graphql',
+      queryId,
+      variables: clip(JSON.stringify(graphql.variables), MAX_VARIABLES),
+    };
   }
 
   private record(entry: ActivityEntry): void {
@@ -132,12 +195,17 @@ export class ActivityLog {
     this.timer = null;
     const batch = this.pending;
     this.pending = [];
+    const queries = this.pendingQueries;
+    this.pendingQueries = new Map();
     const now = this.now();
     if (batch.length > 0) {
+      const items: Record<string, unknown> = {
+        [`${KEY_PREFIX}${now}:${batch.length}:${this.randomId()}`]: batch,
+      };
+      for (const [id, query] of queries) items[`${QUERY_PREFIX}${id}`] = query;
       try {
-        await this.area.set({
-          [`${KEY_PREFIX}${now}:${batch.length}:${this.randomId()}`]: batch,
-        });
+        await this.area.set(items);
+        for (const id of queries.keys()) this.writtenQueries.add(id);
       } catch (error) {
         this.onError(error);
       }
@@ -176,6 +244,17 @@ async function prune(area: LogArea, now: number): Promise<void> {
   if (stale.length > 0) await area.remove(stale);
 }
 
+function isBody(value: unknown): value is CallBody {
+  if (typeof value !== 'object' || value === null) return false;
+  const b = value as Record<string, unknown>;
+  if (b['kind'] === 'graphql') {
+    return typeof b['queryId'] === 'string' && typeof b['variables'] === 'string';
+  }
+  return (
+    b['kind'] === 'text' && typeof b['text'] === 'string' && typeof b['truncated'] === 'boolean'
+  );
+}
+
 function isEntry(value: unknown): value is ActivityEntry {
   if (typeof value !== 'object' || value === null) return false;
   const e = value as Record<string, unknown>;
@@ -188,8 +267,17 @@ function isEntry(value: unknown): value is ActivityEntry {
     (e['detail'] === null || typeof e['detail'] === 'string') &&
     (e['status'] === null || typeof e['status'] === 'number') &&
     (e['error'] === null || typeof e['error'] === 'string') &&
-    typeof e['ms'] === 'number'
+    typeof e['ms'] === 'number' &&
+    // Entries written before bodies were kept have none.
+    (e['body'] === undefined || e['body'] === null || isBody(e['body']))
   );
+}
+
+/** Entries of an earlier build have no `body`: read them as having none. */
+function withBody(entry: ActivityEntry): ActivityEntry {
+  return entry.kind === 'call' && (entry.body as CallBody | null | undefined) === undefined
+    ? { ...entry, body: null }
+    : entry;
 }
 
 /** The entries of the last 30 minutes, newest first. Malformed entries are skipped. */
@@ -203,14 +291,43 @@ export async function readActivity(area: LogArea, now: number): Promise<Activity
   const entries = Object.values(stored)
     .flatMap((batch) => (Array.isArray(batch) ? (batch as unknown[]) : []))
     .filter(isEntry)
-    .filter((e) => e.at >= now - LOG_WINDOW_MS);
+    .filter((e) => e.at >= now - LOG_WINDOW_MS)
+    .map(withBody);
   // Stable: entries of the same millisecond keep their order, then the whole list is reversed.
   return entries.sort((a, b) => a.at - b.at).reverse();
 }
 
 export async function clearActivity(area: LogArea): Promise<void> {
-  const keys = (await area.getKeys()).filter((key) => key.startsWith(KEY_PREFIX));
+  const keys = (await area.getKeys()).filter(
+    (key) => key.startsWith(KEY_PREFIX) || key.startsWith(QUERY_PREFIX),
+  );
   if (keys.length > 0) await area.remove(keys);
+}
+
+/** The query text stored under `queryId`, or `null` when it is gone (cleared, other session). */
+export async function readQuery(area: LogArea, queryId: string): Promise<string | null> {
+  const key = `${QUERY_PREFIX}${queryId}`;
+  const { [key]: query } = await area.get([key]);
+  return typeof query === 'string' ? query : null;
+}
+
+/** JSON indented for reading, or the text as it is when it is not JSON. */
+function pretty(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+/** A kept body as it reads on the options page. */
+export function formatBody(body: CallBody, query: string | null): string {
+  if (body.kind === 'text') {
+    const note = body.truncated ? `\n… cut at ${MAX_BODY_TEXT / 1024} kB` : '';
+    return `${pretty(body.text)}${note}`;
+  }
+  const text = query ?? '(query text no longer in the log)';
+  return `${text.trim()}\n\nvariables:\n${pretty(body.variables)}`;
 }
 
 /** Drops credentials and fragments from a URL. The token travels in a header, never here. */
@@ -237,24 +354,19 @@ function sizeOf(body: string): string {
  */
 export function describeBody(body: BodyInit | null | undefined): string | null {
   if (typeof body !== 'string') return null;
-  if (!body.startsWith('{"query"')) return sizeOf(body);
-  try {
-    const parsed = JSON.parse(body) as { query?: unknown; variables?: unknown };
-    if (typeof parsed.query !== 'string') return sizeOf(body);
-    const operation = /\b(?:query|mutation)\s+(\w+)/.exec(parsed.query)?.[1] ?? 'GraphQL';
-    const vars =
-      typeof parsed.variables === 'object' && parsed.variables !== null
-        ? (parsed.variables as Record<string, unknown>)
-        : {};
-    const { owner, name, number, after } = vars;
-    const pr =
-      typeof owner === 'string' && typeof name === 'string' && typeof number === 'number'
-        ? ` ${owner}/${name}#${number}`
-        : '';
-    return `${operation}${pr}${typeof after === 'string' ? ', next page' : ''}`;
-  } catch {
-    return sizeOf(body);
-  }
+  const graphql = parseGraphql(body);
+  if (!graphql) return sizeOf(body);
+  const operation = /\b(?:query|mutation)\s+(\w+)/.exec(graphql.query)?.[1] ?? 'GraphQL';
+  const vars =
+    typeof graphql.variables === 'object' && graphql.variables !== null
+      ? (graphql.variables as Record<string, unknown>)
+      : {};
+  const { owner, name, number, after } = vars;
+  const pr =
+    typeof owner === 'string' && typeof name === 'string' && typeof number === 'number'
+      ? ` ${owner}/${name}#${number}`
+      : '';
+  return `${operation}${pr}${typeof after === 'string' ? ', next page' : ''}`;
 }
 
 /** Wraps `fetch` so that every call lands in the log, answered or not. */
@@ -271,32 +383,39 @@ export function loggingFetch(
       typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
     );
     const detail = describeBody(init?.body);
+    const sent = typeof init?.body === 'string' ? init.body : undefined;
     let response: Response;
     try {
       response = await inner(input, init);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      log.call({
+      log.call(
+        {
+          at: started,
+          method,
+          url,
+          detail,
+          status: null,
+          error: message,
+          ms: now() - started,
+        },
+        sent,
+      );
+      throw error;
+    }
+    // Outside the try: logging must never turn an answered call into a failed one.
+    log.call(
+      {
         at: started,
         method,
         url,
         detail,
-        status: null,
-        error: message,
+        status: response.status,
+        error: null,
         ms: now() - started,
-      });
-      throw error;
-    }
-    // Outside the try: logging must never turn an answered call into a failed one.
-    log.call({
-      at: started,
-      method,
-      url,
-      detail,
-      status: response.status,
-      error: null,
-      ms: now() - started,
-    });
+      },
+      sent,
+    );
     return response;
   };
 }

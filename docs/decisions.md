@@ -5,6 +5,14 @@ and the few places where the code deliberately differs from it. Each entry says 
 
 ## Deviations from the design
 
+### The badge refreshes at most every 5 minutes
+
+The design says 10. The product owner asked for 5. In between, every page shows the cached score:
+navigating GitHub costs no call. A refresh is a few GitHub calls per pull request of the week, so
+this doubles the worst-case use of the developer's GitHub rate limit, which stays far below it.
+
+**To revert:** `REFRESH_INTERVAL_MS` in `packages/extension/src/lib/time.ts`.
+
 ### Commented lines are rounded without bias
 
 The design rounds every line count to the nearest 10 before it leaves the browser. Taken
@@ -148,7 +156,7 @@ question below.
 
 ### Refresh
 
-- The 10-minute throttle counts from the last attempt, successful or not, so a broken server is not
+- The 5-minute throttle counts from the last attempt, successful or not, so a broken server is not
   hammered. Saving the options refreshes at once.
 - The server's class globs are fetched first on every refresh: a server that is down costs no
   GitHub call.
@@ -180,6 +188,10 @@ question below.
   also filters entries by time when it reads them.
 - Writing the log never fails a refresh: errors go to the worker console, and a failed write
   still prunes, which frees room for the next one.
+- Each call keeps what it sent. A GraphQL body is kept as its variables (2,000 characters at
+  most) and the id of its query text, which is written once under `activityQuery:<FNV-1a id>`:
+  a refresh of hundreds of calls shares three queries. Any other body (the score payload) is kept
+  as text up to 64 kB. Responses are not kept. Headers never reach the wrapper's record.
 - The status is the HTTP status, known when the headers arrive. A GraphQL error inside a 200, or
   a body that times out after its headers, shows only in the refresh's own failure line.
 - Without a token, the skipped refresh is logged once, when the token goes away, not on every
@@ -200,8 +212,14 @@ question below.
   hidden container (GitHub hides the whole header on its search page) is skipped, not rejected. A
   container that clips the badge is not tried again until the next navigation or resize. Nothing
   hides the badge at narrow widths; it shortens to the ratio instead.
-- The first placement waits for the page's `load` and an idle moment, after GitHub hydrates its
-  React header, which would otherwise throw the badge away.
+- No flicker between pages. The content script starts with the page and asks the worker for the
+  cached badge at once. GitHub renders its header on the server, then React hydrates it; a node
+  added before that makes React throw the header away and render it again. GitHub marks each
+  React root's commit (`react-root:commit:<partial>`) and performance marks are shared with the
+  extension's world, so the badge goes in on the first frame after that mark (3 seconds at most,
+  should GitHub rename it). A header swapped in by a navigation waits for its own commit. When
+  GitHub re-renders or replaces the header, a mutation observer puts the badge back in the same
+  microtask, before anything paints, at most 20 times a second.
 - When no place works 3 seconds after the page loads or GitHub navigates, the badge floats in the
   bottom-right corner, and moves into the header as soon as a place appears.
 - Signed-out, sign-in and sudo pages show no badge (no `meta[name="user-login"]` and no

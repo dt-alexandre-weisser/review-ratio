@@ -52,10 +52,10 @@ async function setup(
 }
 
 describe('isRefreshDue', () => {
-  it('is due on an empty cache, not within 10 minutes, and not while a refresh runs', () => {
+  it('is due on an empty cache, not within 5 minutes, and not while a refresh runs', () => {
     expect(isRefreshDue(EMPTY_CACHE, NOW)).toBe(true);
-    expect(isRefreshDue({ ...EMPTY_CACHE, attemptedAt: NOW - 9 * 60_000 }, NOW)).toBe(false);
-    expect(isRefreshDue({ ...EMPTY_CACHE, attemptedAt: NOW - 10 * 60_000 }, NOW)).toBe(true);
+    expect(isRefreshDue({ ...EMPTY_CACHE, attemptedAt: NOW - 4 * 60_000 }, NOW)).toBe(false);
+    expect(isRefreshDue({ ...EMPTY_CACHE, attemptedAt: NOW - 5 * 60_000 }, NOW)).toBe(true);
     expect(isRefreshDue({ ...EMPTY_CACHE, refreshStartedAt: NOW - 60_000 }, NOW)).toBe(false);
     expect(isRefreshDue({ ...EMPTY_CACHE, refreshStartedAt: NOW - 4 * 60_000 }, NOW)).toBe(false);
     // A refresh started long ago died with its worker; another may start.
@@ -263,12 +263,12 @@ describe('refresh', () => {
 });
 
 describe('refreshIfDue', () => {
-  it('refreshes at most once every 10 minutes', async () => {
+  it('refreshes at most once every 5 minutes', async () => {
     const { deps, srv, advance } = await setup();
     expect((await refreshIfDue(deps)).refreshed).toBe(true);
-    advance(5 * 60_000);
+    advance(4 * 60_000);
     expect((await refreshIfDue(deps)).refreshed).toBe(false);
-    advance(5 * 60_000);
+    advance(60_000);
     expect((await refreshIfDue(deps)).refreshed).toBe(true);
     expect(srv.scored).toHaveLength(2);
   });

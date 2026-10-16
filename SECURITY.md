@@ -28,10 +28,11 @@ does without DevTools.
 
 - Kept in `chrome.storage.session`: in memory only, gone when the browser closes, and out of reach
   of content scripts.
-- Holds the time, method, URL, status and duration of each call, the GraphQL operation and PR it
-  read, and refresh start and end lines. URLs name repositories, PRs and your login. The page says
-  so, and repeats it after **Copy as text**.
-- Never holds a header or a body, so never the token or the payload.
+- Holds the time, method, URL, status and duration of each call, what it sent, and refresh start
+  and end lines. What was sent is the GraphQL query and its variables (repository, PR number,
+  your login, page cursors) or the score payload (numbers only), up to 64 kB. URLs and variables
+  name repositories, PRs and your login. The page says so, and repeats it after a copy.
+- Never holds a header, so never the token. Responses are not kept.
 - Cleared by **Forget local activity data**. Nothing in it leaves the browser.
 - Next to it, the worker keeps where the badge last went on github.com and, when it floats, what
   the content script saw of the header: tag names, ids, classes and layout, never page text or

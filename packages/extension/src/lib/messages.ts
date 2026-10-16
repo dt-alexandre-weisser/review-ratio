@@ -14,7 +14,7 @@ const HEADER_TEXT = /^[\w .#:[\]\n-]*$/;
 
 /** Messages between the content script, the options page and the background worker. */
 export type Request =
-  /** The content script asks for the badge. Triggers a refresh when the cache is older than 10 minutes. */
+  /** The content script asks for the badge. Triggers a refresh when the cache is older than 5 minutes. */
   | { type: 'badge:get' }
   /** The content script says where the badge went, and the header it saw when it floats. */
   | { type: 'badge:placed'; placement: Placement; header: string }

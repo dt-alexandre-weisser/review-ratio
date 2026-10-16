@@ -3,8 +3,8 @@ import { HOUR_MS } from '@review-ratio/contract';
 export const DAY_MS = 24 * HOUR_MS;
 /** The rolling window of the ratio, on both sides. */
 export const WINDOW_MS = 7 * DAY_MS;
-/** The badge refreshes at most this often. */
-export const REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+/** The badge refreshes at most this often; in between, every page shows the cached score. */
+export const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 /**
  * A refresh older than this is considered dead and another one may start. Chrome stops a
  * service worker whose single request runs past 5 minutes.

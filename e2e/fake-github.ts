@@ -95,6 +95,11 @@ export interface FakeGitHubOptions {
   signedOut?: boolean;
   /** Hide the header at first and show it after this long, as GitHub's search page does. */
   headerShowsAfterMs?: number;
+  /**
+   * Serve the header as GitHub does, server-rendered in a React partial, and mark its React commit
+   * (hydration) after this long.
+   */
+  hydratesAfterMs?: number;
 }
 
 const ROW = 'display:flex;align-items:center;gap:8px';
@@ -134,6 +139,19 @@ const HEADERS = {
   unknown: `<header class="GlobalNav" role="banner"><div class="GlobalNav-end" style="${ROW}"><a href="/notifications">bell</a></div></header>`,
 };
 
+function header(options: FakeGitHubOptions): string {
+  const html = HEADERS[options.header ?? 'globalnav'];
+  if (options.headerShowsAfterMs !== undefined) {
+    return `<div id="late" style="display:none">${html}</div>
+      <script>setTimeout(() => { document.getElementById('late').style.display = ''; }, ${options.headerShowsAfterMs});</script>`;
+  }
+  if (options.hydratesAfterMs !== undefined) {
+    return `<react-partial partial-name="global-nav-bar" data-ssr="true">${html}</react-partial>
+      <script>setTimeout(() => performance.mark('react-root:commit:global-nav-bar'), ${options.hydratesAfterMs});</script>`;
+  }
+  return html;
+}
+
 export async function installFakeGitHub(context: BrowserContext, options: FakeGitHubOptions = {}) {
   await context.route('https://github.com/**', (route) =>
     route.fulfill({
@@ -142,12 +160,7 @@ export async function installFakeGitHub(context: BrowserContext, options: FakeGi
       body: `<!doctype html><html><head><title>GitHub</title>
         ${options.signedOut ? '' : `<meta name="user-login" content="${ME}">`}
         </head><body class="${options.signedOut ? 'logged-out' : 'logged-in'}">
-        ${
-          options.headerShowsAfterMs === undefined
-            ? HEADERS[options.header ?? 'globalnav']
-            : `<div id="late" style="display:none">${HEADERS[options.header ?? 'globalnav']}</div>
-               <script>setTimeout(() => { document.getElementById('late').style.display = ''; }, ${options.headerShowsAfterMs});</script>`
-        }
+        ${header(options)}
         <main><h1>Fake GitHub</h1></main></body></html>`,
     }),
   );

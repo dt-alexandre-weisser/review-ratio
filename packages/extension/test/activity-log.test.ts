@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ActivityLog,
   FLUSH_DELAY_MS,
+  MAX_BODY_TEXT,
+  formatBody,
+  parseGraphql,
+  queryIdOf,
+  readQuery,
   LOG_WINDOW_MS,
   MAX_ENTRIES,
   MAX_BATCH_ENTRIES,
@@ -46,8 +51,15 @@ function call(overrides: Partial<CallEntry> = {}): Omit<CallEntry, 'kind'> {
     status: 200,
     error: null,
     ms: 120,
+    body: null,
     ...overrides,
   };
+}
+
+/** What `ActivityLog.call` takes: an entry without its kept body. */
+function sent(overrides: Partial<CallEntry> = {}): Omit<CallEntry, 'kind' | 'body'> {
+  const { body: _body, ...entry } = call(overrides);
+  return entry;
 }
 
 const logKeys = (data: Record<string, unknown>) =>
@@ -62,7 +74,7 @@ describe('ActivityLog', () => {
     vi.useFakeTimers();
     const { area, log } = setup();
     log.event('refresh started');
-    log.call(call());
+    log.call(sent());
     expect(logKeys(area.data)).toEqual([]);
     await vi.advanceTimersByTimeAsync(FLUSH_DELAY_MS);
     expect(logKeys(area.data)).toEqual([`activity:${NOW}:2:id1`]);
@@ -193,7 +205,7 @@ describe('ActivityLog', () => {
     const { area, log, now } = setup();
     log.event('m'.repeat(5000));
     log.call(
-      call({
+      sent({
         url: `https://x.test/${'u'.repeat(5000)}`,
         detail: 'd'.repeat(5000),
         error: 'e'.repeat(5000),
@@ -234,6 +246,7 @@ describe('loggingFetch', () => {
         status: 404,
         error: null,
         ms: 250,
+        body: null,
       },
     ]);
     expect(JSON.stringify(area.data)).not.toContain('github_pat_secret');
@@ -405,5 +418,97 @@ describe('rows, summary and text', () => {
     );
     expect(lines[2]).toMatch(/ {2}— refreshed: 1 review, 1 own PR$/);
     expect(toText([])).toBe('');
+  });
+});
+
+describe('request bodies', () => {
+  const QUERY = 'query PullRequest($owner: String!) { repository(owner: $owner) { id } }';
+  const graphql = (variables: unknown) => JSON.stringify({ query: QUERY, variables });
+
+  it('keeps GraphQL variables per call and the query text once', async () => {
+    const { area, log, now } = setup();
+    const fetchLogged = loggingFetch(() => Promise.resolve(new Response('{}')), log, now);
+    for (const number of [1, 2, 3]) {
+      await fetchLogged('https://api.github.com/graphql', {
+        method: 'POST',
+        body: graphql({ owner: 'DiliTrust', name: 'app', number, me: 'dev' }),
+      });
+    }
+    await log.flush();
+    const id = queryIdOf(QUERY);
+    expect(Object.keys(area.data).filter((k) => k.startsWith('activityQuery:'))).toEqual([
+      `activityQuery:${id}`,
+    ]);
+    const [latest] = (await readActivity(area, now())) as CallEntry[];
+    expect(latest?.body).toEqual({
+      kind: 'graphql',
+      queryId: id,
+      variables: '{"owner":"DiliTrust","name":"app","number":3,"me":"dev"}',
+    });
+    expect(await readQuery(area, id)).toBe(QUERY);
+    expect(formatBody(latest!.body!, QUERY)).toBe(
+      `${QUERY}\n\nvariables:\n{\n  "owner": "DiliTrust",\n  "name": "app",\n  "number": 3,\n  "me": "dev"\n}`,
+    );
+
+    // Not written again by this writer; written again by a new one (a restarted worker).
+    await area.remove([`activityQuery:${id}`]);
+    await fetchLogged('https://api.github.com/graphql', { method: 'POST', body: graphql({}) });
+    await log.flush();
+    expect(await readQuery(area, id)).toBeNull();
+    const restarted = new ActivityLog(area, { now });
+    restarted.call(sent({ method: 'POST' }), graphql({}));
+    await restarted.flush();
+    expect(await readQuery(area, id)).toBe(QUERY);
+  });
+
+  it('keeps other bodies as text, cut at a size', async () => {
+    const { area, log, now } = setup();
+    log.call(sent({ method: 'POST' }), '{"contractVersion":1,"up":[]}');
+    log.call(sent({ method: 'POST' }), 'x'.repeat(MAX_BODY_TEXT + 10));
+    log.call(sent({ method: 'POST' }), '{"query": broken');
+    await log.flush();
+    const [broken, big, score] = (await readActivity(area, now())) as CallEntry[];
+    expect(score?.body).toEqual({
+      kind: 'text',
+      text: '{"contractVersion":1,"up":[]}',
+      truncated: false,
+    });
+    expect(formatBody(score!.body!, null)).toBe('{\n  "contractVersion": 1,\n  "up": []\n}');
+    expect(big?.body).toMatchObject({ kind: 'text', truncated: true });
+    expect(formatBody(big!.body!, null)).toMatch(/\n… cut at 64 kB$/);
+    expect(broken?.body).toEqual({ kind: 'text', text: '{"query": broken', truncated: false });
+    expect(formatBody(broken!.body!, null)).toBe('{"query": broken');
+  });
+
+  it('says when the query text is gone, and reads GraphQL bodies only', () => {
+    expect(formatBody({ kind: 'graphql', queryId: 'x', variables: '{}' }, null)).toBe(
+      '(query text no longer in the log)\n\nvariables:\n{}',
+    );
+    expect(parseGraphql('{"query":"q","variables":{"a":1}}')).toEqual({
+      query: 'q',
+      variables: { a: 1 },
+    });
+    expect(parseGraphql('{"query":"q"}')).toEqual({ query: 'q', variables: null });
+    expect(parseGraphql('{"query":1}')).toBeNull();
+    expect(parseGraphql('{"up":[]}')).toBeNull();
+  });
+
+  it('reads entries of an earlier build without a body, and skips a malformed body', async () => {
+    const { area, now } = setup();
+    const { body: _body, ...old } = { kind: 'call', ...call() };
+    area.data[`activity:${now()}:3:old`] = [
+      old,
+      { kind: 'call', ...call({ at: NOW + 1 }), body: { kind: 'graphql', queryId: 1 } },
+      { kind: 'call', ...call({ at: NOW + 2 }), body: { kind: 'text', text: 'x' } },
+    ];
+    expect(await readActivity(area, now())).toEqual([{ kind: 'call', ...call() }]);
+  });
+
+  it('clears the query texts with the log', async () => {
+    const { area, log } = setup({ settings: { token: 'kept' } });
+    log.call(sent({ method: 'POST' }), graphql({}));
+    await log.flush();
+    await clearActivity(area);
+    expect(Object.keys(area.data)).toEqual(['settings']);
   });
 });

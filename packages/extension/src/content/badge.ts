@@ -184,7 +184,45 @@ export function badgeShows(el: HTMLElement, container: Element): boolean {
 /** GitHub's own signals for a signed-in page, as `github-url-detection` reads them. */
 export function isSignedIn(doc: Document): boolean {
   const login = doc.querySelector('meta[name="user-login"]')?.getAttribute('content');
-  return Boolean(login) || doc.body.classList.contains('logged-in');
+  // `body` is null while the page is still parsing its head.
+  const body = doc.body as HTMLElement | null;
+  return Boolean(login) || body?.classList.contains('logged-in') === true;
+}
+
+/**
+ * How long to wait for GitHub's React to take over a server-rendered header before placing the
+ * badge anyway, in case GitHub renames its performance marks.
+ */
+export const HYDRATION_WAIT_MS = 3_000;
+
+/** For each server-rendered React root seen: marks from before this time are an older root's. */
+const hydrationSeen = new WeakMap<Element, { since: number; firstChecked: number }>();
+let firstRoot = true;
+
+/**
+ * Whether the header can take the badge now. GitHub renders its header on the server, then React
+ * hydrates it; a node added before that makes React throw the header away and render it again.
+ * GitHub marks each React root's commit (`react-root:commit:<name>`), and performance marks are
+ * shared with the extension's world.
+ */
+export function headerReady(doc: Document, now: number = performance.now()): boolean {
+  const header = findHeader(doc);
+  const root = header?.closest('react-partial, react-app');
+  if (root?.getAttribute('data-ssr') !== 'true') return true;
+  const name = root.getAttribute('partial-name') ?? root.getAttribute('app-name') ?? '';
+  let seen = hydrationSeen.get(root);
+  if (!seen) {
+    // The page's first root may have committed before this script ran; a later one (after a
+    // navigation) needs a commit of its own.
+    seen = { since: firstRoot ? 0 : now, firstChecked: now };
+    firstRoot = false;
+    hydrationSeen.set(root, seen);
+  }
+  if (now - seen.firstChecked >= HYDRATION_WAIT_MS) return true;
+  const since = seen.since;
+  return performance
+    .getEntriesByName(`react-root:commit:${name}`, 'mark')
+    .some((mark) => mark.startTime >= since);
 }
 
 function span(doc: Document, className: string, text: string): HTMLSpanElement {

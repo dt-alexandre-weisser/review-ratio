@@ -1,6 +1,8 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    // The end-to-end tests run callbacks in the page: they need the DOM's types.
+    "lib": ["ES2023", "DOM"],
     "types": ["node", "chrome"],
     "allowJs": true,
     "checkJs": true

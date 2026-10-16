@@ -8,7 +8,7 @@ export interface Sender {
 
 /**
  * Who may send what. Content scripts on github.com may only ask for the badge, which refreshes at
- * most every 10 minutes, and say where they put it. Forcing a refresh or reading the diagnostics
+ * most every 5 minutes, and say where they put it. Forcing a refresh or reading the diagnostics
  * is for the extension's own pages (the options page).
  */
 export function isTrustedFor(

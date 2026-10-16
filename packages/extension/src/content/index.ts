@@ -1,21 +1,35 @@
 /**
- * Content script: asks the background worker for the badge and keeps it mounted through
- * GitHub's Turbo navigation. Clicking the badge does nothing.
+ * Content script: shows the badge in GitHub's header and keeps it there without flicker. Clicking
+ * the badge does nothing.
+ *
+ * It starts with the page and asks the worker for the cached badge at once, so the badge is ready
+ * before GitHub's header is. It goes in on the first frame after GitHub's React takes over the
+ * header. When GitHub re-renders or replaces the header (navigation), a mutation observer puts it
+ * back before the browser paints, so no frame shows the header without it.
  *
  * When the extension is updated or reloaded, this script is orphaned: it can no longer talk to
  * the extension. It then stops itself and leaves the badge to the newly injected script.
  */
 import type { BadgeView } from '../lib/badge-state.ts';
 import { isBadgeUpdate, type Placement, type Request, type Response } from '../lib/messages.ts';
-import { BADGE_ID, describeHeader, forgetRejections, isSignedIn, mount } from './badge.ts';
+import {
+  BADGE_ID,
+  describeHeader,
+  forgetRejections,
+  headerReady,
+  isSignedIn,
+  mount,
+} from './badge.ts';
 
 const REMOUNT_INTERVAL_MS = 5_000;
 /** How long GitHub gets to render its header, after a load or a navigation, before the badge floats. */
 const FLOATING_AFTER_MS = 3_000;
+/** Restores by the mutation observer per second, at most: a page fighting the badge cannot loop. */
+const MAX_RESTORES_PER_SECOND = 20;
 /** Start of the current grace period: the script start, then each navigation. */
 let graceFrom = Date.now();
-// GitHub navigates without page loads (Turbo, then its own soft navigation); the periodic remount
-// covers any event not listed here.
+// GitHub navigates without page loads (Turbo, then its own soft navigation); the observer and the
+// periodic check cover any event not listed here.
 const NAVIGATION_EVENTS = [
   'turbo:load',
   'turbo:render',
@@ -29,11 +43,8 @@ let lastView: BadgeView | null = null;
 /** The placement last reported to the worker, so each change is reported once. */
 let reported: Placement | null = null;
 let requesting = false;
-/**
- * Set once the page has loaded and gone idle: GitHub hydrates its React header after load, and a
- * node added before that is thrown away with the server-rendered subtree.
- */
-let settled = false;
+let frame = 0;
+let restores = { second: 0, count: 0 };
 
 function alive(): boolean {
   try {
@@ -53,10 +64,16 @@ function ensureMounted(): void {
     void requestBadge();
     return;
   }
-  if (!settled) return;
+  // Still parsing the head: nothing to place the badge in yet.
+  if (!(document.body as HTMLElement | null)) return;
   // Signed-out, sign-in and sudo pages: the ratio is the signed-in developer's own, not shown.
   if (!isSignedIn(document)) {
     document.getElementById(BADGE_ID)?.remove();
+    return;
+  }
+  // Until GitHub's React takes over its server-rendered header, check again every frame.
+  if (!headerReady(document)) {
+    scheduleMount();
     return;
   }
   const mounted = mount(document, lastView, {
@@ -71,6 +88,28 @@ function ensureMounted(): void {
     });
   }
 }
+
+/** Once, before the next frame paints. */
+function scheduleMount(): void {
+  if (frame !== 0) return;
+  frame = window.requestAnimationFrame(() => {
+    frame = 0;
+    ensureMounted();
+  });
+}
+
+/**
+ * GitHub re-rendered or replaced the header and the badge went with it: put it back now, in the
+ * same microtask, before anything paints.
+ */
+const observer = new MutationObserver(() => {
+  if (!lastView || document.getElementById(BADGE_ID)) return;
+  const second = Math.floor(Date.now() / 1000);
+  if (restores.second !== second) restores = { second, count: 0 };
+  restores.count += 1;
+  // Beyond the limit, the periodic check takes over.
+  if (restores.count <= MAX_RESTORES_PER_SECOND) ensureMounted();
+});
 
 async function ask(request: Request): Promise<Response | null> {
   if (!alive()) return null;
@@ -116,8 +155,7 @@ function onNavigate(): void {
   graceFrom = Date.now();
   window.clearTimeout(graceCheck);
   graceCheck = window.setTimeout(ensureMounted, FLOATING_AFTER_MS);
-  // After GitHub's React takes over the new header, as on the first load.
-  window.requestIdleCallback(ensureMounted, { timeout: 1_000 });
+  scheduleMount();
 }
 
 let resizeTimer = 0;
@@ -131,20 +169,9 @@ function onResize(): void {
   }, 500);
 }
 
-function onSettled(): void {
-  settled = true;
-  ensureMounted();
-}
-
-if (document.readyState === 'complete') {
-  window.requestIdleCallback(onSettled, { timeout: 2_000 });
-} else {
-  window.addEventListener('load', () => window.requestIdleCallback(onSettled, { timeout: 2_000 }), {
-    once: true,
-  });
-}
-
 function teardown(): void {
+  observer.disconnect();
+  window.cancelAnimationFrame(frame);
   window.clearInterval(timer);
   window.clearTimeout(graceCheck);
   window.clearTimeout(resizeTimer);
@@ -154,6 +181,8 @@ function teardown(): void {
 }
 
 chrome.runtime.onMessage.addListener(onMessage);
+// The document element exists from the start and survives Turbo's body swaps.
+observer.observe(document.documentElement, { childList: true, subtree: true });
 for (const event of NAVIGATION_EVENTS) document.addEventListener(event, onNavigate);
 window.addEventListener('resize', onResize);
 document.addEventListener('visibilitychange', onVisibilityChange);

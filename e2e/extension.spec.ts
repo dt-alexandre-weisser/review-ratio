@@ -339,3 +339,81 @@ test('shows no badge on signed-out pages', async ({ context, extensionId }) => {
   await github.waitForTimeout(4_000);
   await expect(github.locator('#review-ratio-badge')).toHaveCount(0);
 });
+
+test("waits for GitHub's React to take over its header before placing the badge", async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context, { hydratesAfterMs: 1_500 });
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+  const github = await context.newPage();
+  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  const badge = github.locator('#review-ratio-badge');
+  await github.waitForTimeout(800);
+  await expect(badge).toHaveCount(0);
+  await expect(badge).toHaveAttribute('data-placement', 'header', { timeout: 3_000 });
+  const marked = await github.evaluate(
+    () => performance.getEntriesByName('react-root:commit:global-nav-bar')[0]?.startTime ?? 0,
+  );
+  expect(marked).toBeGreaterThan(1_000);
+});
+
+test('keeps the badge on screen when GitHub replaces its header, without a single frame missing', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context);
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+  const github = await context.newPage();
+  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await expect(github.locator('#review-ratio-badge')).toHaveAttribute('data-placement', 'header');
+
+  // As GitHub's navigation does: a fresh header replaces the old one, three times. Every frame
+  // after each swap is checked for the badge.
+  const missing = await github.evaluate(async () => {
+    let frames = 0;
+    let without = 0;
+    for (let swap = 0; swap < 3; swap++) {
+      const header = document.querySelector('header')!;
+      const fresh = header.cloneNode(true) as Element;
+      fresh.querySelector('#review-ratio-badge')?.remove();
+      header.replaceWith(fresh);
+      for (let i = 0; i < 10; i++) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        frames += 1;
+        if (!fresh.querySelector('#review-ratio-badge')) without += 1;
+      }
+    }
+    return { frames, without };
+  });
+  expect(missing).toEqual({ frames: 30, without: 0 });
+});
+
+test('shows the payload of each call', async ({ context, extensionId }) => {
+  await installFakeGitHub(context);
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+  const rows = options.locator('#activity-rows');
+  await expect(rows).toContainText('POST 127.0.0.1:8787/score');
+
+  const view = (call: string) =>
+    rows.locator('tr', { hasText: call }).first().getByRole('button', { name: 'View payload' });
+  await view('POST api.github.com/graphql').click();
+  const payload = options.locator('#payload');
+  await expect(payload).toBeVisible();
+  await expect(options.locator('#payload-title')).toHaveText('POST api.github.com/graphql');
+  await expect(options.locator('#payload-text')).toContainText('query PullRequest');
+  await expect(options.locator('#payload-text')).toContainText('"owner": "DiliTrust"');
+  await expect(options.locator('#payload-text')).not.toContainText('github_pat_e2e');
+
+  await view('POST 127.0.0.1:8787/score').click();
+  await expect(options.locator('#payload-text')).toContainText('"contractVersion": 1');
+  await expect(
+    rows.locator('tr', { hasText: 'GET api.github.com/user' }).first().getByRole('button'),
+  ).toHaveCount(0);
+
+  await options.getByRole('button', { name: 'Close' }).click();
+  await expect(payload).toBeHidden();
+});

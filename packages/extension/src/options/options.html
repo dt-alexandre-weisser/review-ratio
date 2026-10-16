@@ -114,10 +114,11 @@
           <button type="button" id="copy-activity">Copy as text</button>
         </div>
         <p class="hint">
-          Every call this extension made, newest first. The badge refreshes when a github.com page
-          loads or comes back into view, at most every 10 minutes. The log stays in this browser's
-          memory and is gone when the browser closes. It shows repository names, so read it before
-          sharing it.
+          Every call this extension made, newest first, with what it sent: open a call's payload to
+          read the GraphQL query and variables, or the numbers sent to the server. The badge
+          refreshes when a github.com page loads or comes back into view, at most every 5 minutes.
+          The log stays in this browser's memory and is gone when the browser closes. It shows
+          repository names, so read it before sharing it.
         </p>
         <p id="activity-summary">No calls in the last 30 minutes.</p>
         <table id="activity">
@@ -131,6 +132,17 @@
           </thead>
           <tbody id="activity-rows"></tbody>
         </table>
+        <section id="payload" hidden aria-labelledby="payload-title">
+          <div class="section-head">
+            <h3 id="payload-title">Payload</h3>
+            <div class="row">
+              <button type="button" id="copy-payload">Copy</button>
+              <button type="button" id="close-payload">Close</button>
+            </div>
+          </div>
+          <p id="payload-meta" class="hint"></p>
+          <pre id="payload-text"></pre>
+        </section>
       </section>
     </main>
     <script src="options.js"></script>

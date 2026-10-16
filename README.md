@@ -75,7 +75,8 @@ The token stays in `chrome.storage.local` and is only sent to `api.github.com`.
 | Server retired this version  | `update the extension`, grey                   |
 | No token, or token rejected  | `review-ratio: set up` or `token rejected`     |
 
-The badge refreshes on page load, at most once every 10 minutes. Clicking it does nothing. The
+The badge refreshes on page load, at most once every 5 minutes; in between, every page shows the
+cached score. Clicking it does nothing. The
 options page has **Refresh badge now** and shows the last score and error.
 
 ### Where the badge is
@@ -94,7 +95,9 @@ disappearing, and the options page says so under **On github.com**, with what it
 
 The options page (toolbar icon, or **Details › Extension options** in `chrome://extensions`) lists
 every call the extension made in the last 30 minutes, newest first: time, method and URL, status,
-duration, and refresh start and end lines. It updates live and **Copy as text** copies it. The log
+duration, and refresh start and end lines. **View payload** on a call shows what it sent: the
+GraphQL query and variables, or the score payload. The log updates live and **Copy as text**
+copies it. The log
 stays in memory and is gone when the browser closes. See [SECURITY.md](SECURITY.md).
 
 ## Repository layout

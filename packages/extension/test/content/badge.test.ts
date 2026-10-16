@@ -7,7 +7,9 @@ import {
   describeHeader,
   findHeader,
   findSearch,
+  HYDRATION_WAIT_MS,
   forgetRejections,
+  headerReady,
   isSignedIn,
   mount,
   searchSpot,
@@ -340,5 +342,44 @@ describe('describeHeader', () => {
     const many = '<div></div>'.repeat(200);
     document.body.innerHTML = `<header>${many}</header>`;
     expect(describeHeader(document).split('\n')).toHaveLength(2 + 80);
+  });
+});
+
+describe('headerReady', () => {
+  const ssr = (inner: string) =>
+    `<react-partial partial-name="global-nav-bar" data-ssr="true">${inner}</react-partial>`;
+
+  it("waits for GitHub's React to commit a server-rendered header, and no longer than a bound", () => {
+    performance.clearMarks();
+    // No React root, or one rendered on the client: nothing to wait for.
+    document.body.innerHTML = GLOBAL_NAV;
+    expect(headerReady(document)).toBe(true);
+    document.body.innerHTML = `<react-partial partial-name="global-nav-bar">${GLOBAL_NAV}</react-partial>`;
+    expect(headerReady(document)).toBe(true);
+
+    // The page's first root: a commit from before the script ran counts.
+    document.body.innerHTML = ssr(GLOBAL_NAV);
+    expect(headerReady(document)).toBe(false);
+    performance.mark('react-root:commit:global-nav-bar');
+    expect(headerReady(document)).toBe(true);
+
+    // A root swapped in by a navigation needs a commit of its own.
+    document.body.innerHTML = ssr(GLOBAL_NAV);
+    const seen = performance.now();
+    expect(headerReady(document, seen)).toBe(false);
+    performance.mark('react-root:commit:global-nav-bar');
+    expect(headerReady(document, seen + 1)).toBe(true);
+
+    // GitHub renamed its marks: place the badge anyway after a while.
+    document.body.innerHTML = ssr(GLOBAL_NAV);
+    const start = performance.now();
+    expect(headerReady(document, start)).toBe(false);
+    expect(headerReady(document, start + HYDRATION_WAIT_MS)).toBe(true);
+  });
+
+  it('reads the signed-in signal while the body does not exist yet', () => {
+    const doc = document.implementation.createHTMLDocument('');
+    doc.documentElement.removeChild(doc.body);
+    expect(isSignedIn(doc)).toBe(false);
   });
 });

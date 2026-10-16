@@ -20,6 +20,10 @@ First prototype.
   header has no place for it, it floats in the bottom-right corner instead of not showing; the
   options page says where it went and what it saw of the header. ↑ and ↓ take GitHub's colours
   for added and removed lines, from the user's theme.
+- Each logged call can show what it sent: the GraphQL query and variables, or the score payload.
+- No badge flicker between pages: the badge is placed as soon as GitHub's React header is ready
+  and put back before the next paint when GitHub replaces the header. Refreshes at most every 5
+  minutes (the design said 10), from the cache in between.
 - CI: format, lint, typecheck (scripts included), unit and contract tests with per-package
   coverage thresholds, released-pin comparison with `main`, build, end-to-end tests in Chromium,
   Docker image smoke test.
