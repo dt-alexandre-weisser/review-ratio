@@ -1,10 +1,12 @@
 /**
  * Typed access to `chrome.storage.local`. Everything the extension remembers lives here:
- * settings, the cached badge, the random PR keys, the Viewed snapshots and the compare cache.
+ * settings, the GitHub App sign-in, the cached badge, the random PR keys, the Viewed snapshots
+ * and the compare cache.
  *
  * Everything read back is validated: a value written by another build, or corrupted, is dropped
  * instead of breaking every refresh.
  */
+import type { AppTokens } from './auth/tokens.ts';
 import type { CompareFile } from './github/types.ts';
 import { FILE_CLASSES, type LinesByClass } from './scoring/classes.ts';
 import type { Score } from './scoring/formula.ts';
@@ -58,6 +60,12 @@ export const EMPTY_CACHE: Readonly<BadgeCache> = Object.freeze({
 export interface ViewedSnapshot {
   linesByClass: LinesByClass;
   takenAt: number;
+}
+
+/** The GitHub App sign-in. Like the PAT, it never leaves the browser but for GitHub. */
+export interface AppAuth extends AppTokens {
+  /** The GitHub login the tokens belong to, for the options page. */
+  login: string | null;
 }
 
 /** The subset of `chrome.storage.local` the extension uses. Injected for tests. */
@@ -143,6 +151,18 @@ function isSnapshot(value: unknown): value is ViewedSnapshot {
   return isRecord(value) && isLinesByClass(value['linesByClass']) && isCount(value['takenAt']);
 }
 
+function isAppAuth(value: unknown): value is AppAuth {
+  return (
+    isRecord(value) &&
+    typeof value['accessToken'] === 'string' &&
+    value['accessToken'] !== '' &&
+    isNullableNumber(value['accessTokenExpiresAt']) &&
+    (value['refreshToken'] === null || typeof value['refreshToken'] === 'string') &&
+    isNullableNumber(value['refreshTokenExpiresAt']) &&
+    (value['login'] === null || typeof value['login'] === 'string')
+  );
+}
+
 function isCompareFiles(value: unknown): value is CompareFile[] {
   return (
     Array.isArray(value) &&
@@ -168,6 +188,20 @@ export class Store {
 
   async setSettings(settings: Settings): Promise<void> {
     await this.area.set({ settings: coerceSettings(settings) });
+  }
+
+  /** The app sign-in, or `null` when signed out or stored in another shape. */
+  async getAppAuth(): Promise<AppAuth | null> {
+    const { appAuth } = await this.area.get(['appAuth']);
+    return isAppAuth(appAuth) ? appAuth : null;
+  }
+
+  async setAppAuth(appAuth: AppAuth): Promise<void> {
+    await this.area.set({ appAuth });
+  }
+
+  async clearAppAuth(): Promise<void> {
+    await this.area.remove(['appAuth']);
   }
 
   async getBadge(): Promise<BadgeCache> {
@@ -208,7 +242,7 @@ export class Store {
     await this.area.set({ compareCache: cache });
   }
 
-  /** Forgets everything but the settings. */
+  /** Forgets everything but the settings and the sign-in. */
   async clearActivity(): Promise<void> {
     await this.area.remove(ACTIVITY_KEYS);
   }

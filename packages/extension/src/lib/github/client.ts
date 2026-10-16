@@ -1,8 +1,10 @@
 /**
- * GitHub API client. Reads with the developer's own token, read-only. REST for search and
+ * GitHub API client. Reads with the developer's own token, read-only: a pasted PAT or a GitHub App
+ * user access token, from a `TokenSource`. REST for search and
  * compare, GraphQL for one round trip per pull request: files with `viewerViewedState`, a light
  * list of every review, my own reviews with their comments, the timeline and the fork point.
  */
+import type { TokenSource } from '../auth/index.ts';
 import type {
   Actor,
   ActorType,
@@ -43,12 +45,20 @@ export class GitHubRateLimitError extends GitHubError {
   }
 }
 
-export interface GitHubClientOptions {
-  token: string;
+export type GitHubClientOptions = ({ token: string } | { auth: TokenSource }) & {
   fetchImpl?: typeof fetch;
   apiBase?: string;
   /** Search stops after this many pages of 100. GitHub caps search at 1,000 results anyway. */
   maxSearchPages?: number;
+};
+
+/** A token that never changes, for a pasted PAT. */
+export function staticToken(token: string): TokenSource {
+  return {
+    getAccessToken: () => Promise.resolve(token || null),
+    renewAfterUnauthorized: () => Promise.resolve(null),
+    hasCredential: () => Promise.resolve(Boolean(token)),
+  };
 }
 
 /** Under Chrome's 30 s limit for a fetch response in a service worker, so a slow PR is skipped. */
@@ -64,18 +74,21 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiBase = (options.apiBase ?? 'https://api.github.com').replace(/\/+$/, '');
   const maxSearchPages = options.maxSearchPages ?? 10;
+  const source = 'auth' in options ? options.auth : staticToken(options.token);
   const headers = {
     accept: 'application/vnd.github+json',
-    authorization: `Bearer ${options.token}`,
     'x-github-api-version': '2022-11-28',
   };
 
-  async function request(url: string, init: RequestInit = {}): Promise<Response> {
-    let res: Response;
+  async function send(url: string, init: RequestInit, token: string): Promise<Response> {
     try {
-      res = await fetchImpl(url, {
+      return await fetchImpl(url, {
         ...init,
-        headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
+        headers: {
+          ...headers,
+          authorization: `Bearer ${token}`,
+          ...(init.headers as Record<string, string> | undefined),
+        },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (error) {
@@ -83,6 +96,18 @@ export function createGitHubClient(options: GitHubClientOptions): GitHubClient {
         `GitHub unreachable (${error instanceof Error ? error.message : String(error)})`,
         null,
       );
+    }
+  }
+
+  async function request(url: string, init: RequestInit = {}): Promise<Response> {
+    const token = await source.getAccessToken();
+    if (token === null) throw new GitHubAuthError(401);
+    let res = await send(url, init, token);
+    if (res.status === 401) {
+      // An app token may have been revoked or expired early: renew it and retry once.
+      const renewed = await source.renewAfterUnauthorized(token);
+      if (renewed === null) throw new GitHubAuthError(res.status);
+      res = await send(url, init, renewed);
     }
     if (res.status === 401) throw new GitHubAuthError(res.status);
     const retryAfter = res.headers.get('retry-after');

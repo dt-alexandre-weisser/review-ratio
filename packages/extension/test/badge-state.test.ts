@@ -106,7 +106,10 @@ describe('badgeView', () => {
   });
 
   it('asks for set up without a token and flags a rejected token', () => {
-    expect(badgeView(cache({ status: 'no_token' }), NOW).text).toContain('set up');
+    expect(badgeView(cache({ status: 'no_token' }), NOW)).toMatchObject({
+      text: 'review-ratio: set up',
+      tooltip: 'review-ratio is not connected to GitHub. Open the extension options to sign in.',
+    });
     expect(badgeView(cache({ status: 'bad_token' }), NOW).text).toContain('token rejected');
   });
 

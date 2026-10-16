@@ -12,7 +12,7 @@
       <p class="lead">
         A private badge in the GitHub header: how much you review compared to how much you ask to be
         reviewed. Nobody else sees your ratio. The extension computes it in this browser: nothing
-        leaves it except GitHub API calls made with your token.
+        leaves it except calls to GitHub (api.github.com, and github.com to sign in).
       </p>
       <p class="callout">
         <a id="scoring-link" href="scoring.html" target="_blank" rel="noopener"
@@ -23,30 +23,83 @@
 
       <form id="settings">
         <section>
-          <h2>GitHub token</h2>
-          <p>
-            Create a
-            <a
-              href="https://github.com/settings/personal-access-tokens/new"
-              target="_blank"
-              rel="noreferrer"
-              >fine-grained personal access token</a
-            >
-            with resource owner <strong id="org-hint">DiliTrust</strong>, access to all
-            repositories, and these <em>read-only</em> permissions: Pull requests, Contents,
-            Metadata. The token stays in this browser and is only sent to api.github.com.
+          <h2>GitHub access</h2>
+          <fieldset id="auth-mode">
+            <legend>How review-ratio reads GitHub</legend>
+            <label class="choice">
+              <input type="radio" name="auth-mode" id="mode-app" value="app" />
+              Sign in with GitHub <span class="tag">recommended</span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="auth-mode" id="mode-pat" value="pat" />
+              Paste a token
+            </label>
+          </fieldset>
+          <p id="app-unavailable" class="hint" hidden>
+            This build has no GitHub App to sign in with: paste a token.
           </p>
-          <label for="token">Token</label>
-          <div class="row">
-            <input
-              id="token"
-              name="token"
-              type="password"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="github_pat_…"
-            />
-            <button type="button" id="toggle-token" aria-pressed="false">Show</button>
+
+          <div id="app-panel" hidden>
+            <p>
+              Signs in through the review-ratio GitHub App: <em>read-only</em> access to pull
+              requests and code, with a token that expires after 8 hours and renews itself. It stays
+              in this browser and is only sent to GitHub. An owner of
+              <strong id="org-hint-app">DiliTrust</strong> must have
+              <a id="install-link" href="#" target="_blank" rel="noreferrer">installed the app</a>
+              on the organisation.
+            </p>
+            <div id="app-signed-out">
+              <button type="button" id="sign-in" class="primary">Sign in with GitHub</button>
+            </div>
+            <div id="app-waiting" hidden>
+              <p>Enter this code on GitHub:</p>
+              <div class="row code-row">
+                <output id="user-code" class="user-code"></output>
+                <button type="button" id="copy-code">Copy code</button>
+              </div>
+              <div class="row code-row">
+                <a id="verify-link" class="button primary" href="#" target="_blank" rel="noreferrer"
+                  >Open GitHub</a
+                >
+                <button type="button" id="cancel-sign-in">Cancel</button>
+              </div>
+              <p id="waiting-hint" class="hint">Waiting for GitHub…</p>
+            </div>
+            <div id="app-signed-in" hidden>
+              <p>Signed in as <strong id="signed-in-login"></strong>.</p>
+              <button type="button" id="sign-out">Sign out</button>
+              <p class="hint">
+                Sign out forgets the tokens in this browser. To revoke them at GitHub too: Settings
+                → Applications → Authorized GitHub Apps.
+              </p>
+            </div>
+          </div>
+
+          <div id="pat-panel" hidden>
+            <p>
+              Create a
+              <a
+                href="https://github.com/settings/personal-access-tokens/new"
+                target="_blank"
+                rel="noreferrer"
+                >fine-grained personal access token</a
+              >
+              with resource owner <strong id="org-hint">DiliTrust</strong>, access to all
+              repositories, and these <em>read-only</em> permissions: Pull requests, Contents,
+              Metadata. The token stays in this browser and is only sent to api.github.com.
+            </p>
+            <label for="token">Token</label>
+            <div class="row">
+              <input
+                id="token"
+                name="token"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="github_pat_…"
+              />
+              <button type="button" id="toggle-token" aria-pressed="false">Show</button>
+            </div>
           </div>
         </section>
 

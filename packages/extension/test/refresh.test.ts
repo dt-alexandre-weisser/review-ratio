@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { createAuth } from '../src/lib/auth/index.ts';
 import { GitHubAuthError, GitHubError, GitHubRateLimitError } from '../src/lib/github/client.ts';
 import { isRefreshDue, refresh, refreshIfDue, type RefreshDeps } from '../src/lib/refresh.ts';
 import { DEFAULT_SETTINGS } from '../src/lib/settings.ts';
@@ -11,6 +12,7 @@ async function setup(
   options: {
     token?: string;
     github?: ReturnType<typeof fakeGitHub>;
+    fetchImpl?: typeof fetch;
   } = {},
 ) {
   const area = memoryStorage();
@@ -21,9 +23,16 @@ async function setup(
   });
   let clock = NOW;
   const github = options.github ?? fakeGitHub({ prs: [pr({ myReviews: [review({ id: 'r1' })] })] });
+  const now = () => clock;
   const deps: RefreshDeps = {
     store,
-    now: () => clock,
+    now,
+    auth: createAuth({
+      store,
+      fetchImpl: options.fetchImpl ?? vi.fn<typeof fetch>(),
+      now,
+      clientId: 'Iv1.test',
+    }),
     github: vi.fn(() => github),
     randomUUID: () => '00000000-0000-4000-8000-000000000001',
   };
@@ -154,6 +163,32 @@ describe('refresh', () => {
     github.viewer = () => Promise.reject(new GitHubAuthError(401));
     const { deps } = await setup({ github });
     expect((await refresh(deps)).status).toBe('bad_token');
+  });
+
+  it('refreshes with the app sign-in, and goes back to set up once GitHub signs it out', async () => {
+    const github = fakeGitHub({ prs: [pr({ myReviews: [review({ id: 'r1' })] })] });
+    const fetchImpl = vi.fn<typeof fetch>(() =>
+      Promise.resolve(Response.json({ error: 'bad_refresh_token' })),
+    );
+    const { deps, store } = await setup({ token: '', github, fetchImpl });
+    await store.setSettings({ ...(await store.getSettings()), authMode: 'app' });
+    expect((await refresh(deps)).status).toBe('no_token');
+    await store.setAppAuth({
+      accessToken: 'ghu_live',
+      accessTokenExpiresAt: null,
+      refreshToken: 'ghr_1',
+      refreshTokenExpiresAt: null,
+      login: 'me',
+    });
+    expect((await refresh(deps)).status).toBe('ok');
+    expect(deps.github).toHaveBeenCalledWith(deps.auth);
+    github.viewer = async () => {
+      // What the client does on a 401: GitHub refuses the renewal, which clears the sign-in.
+      expect(await deps.auth.renewAfterUnauthorized('ghu_live')).toBeNull();
+      throw new GitHubAuthError(401);
+    };
+    expect((await refresh(deps)).status).toBe('no_token');
+    expect(await store.getAppAuth()).toBeNull();
   });
 
   it('flags GitHub errors apart from other failures, and backs off until a rate limit resets', async () => {

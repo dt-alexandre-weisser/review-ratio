@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 
 import { test as base, chromium, expect, type BrowserContext, type Page } from '@playwright/test';
 
-import { installFakeGitHub } from './fake-github.ts';
+import { USER_CODE, installFakeGitHub, installFakeGitHubLogin } from './fake-github.ts';
 
 const EXTENSION = resolve(import.meta.dirname, '../packages/extension/dist');
 
@@ -14,6 +14,8 @@ const test = base.extend<{ context: BrowserContext; extensionId: string }>({
       headless: true,
       args: [`--disable-extensions-except=${EXTENSION}`, `--load-extension=${EXTENSION}`],
     });
+    // The real app's sign-in is never called: a test signs in through installFakeGitHubLogin.
+    await context.route('https://github.com/login/**', (route) => route.abort('blockedbyclient'));
     await use(context);
     await context.close();
   },
@@ -31,7 +33,8 @@ const test = base.extend<{ context: BrowserContext; extensionId: string }>({
 
 async function configure(page: Page, extensionId: string, settings: { token: string }) {
   await page.goto(`chrome-extension://${extensionId}/options.html`);
-  await page.getByLabel('Token').fill(settings.token);
+  await page.getByLabel('Paste a token').check();
+  await page.getByLabel('Token', { exact: true }).fill(settings.token);
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('#status')).toContainText('Saved');
   // Saving refreshes the badge: wait for its end, so a GitHub page opened next shows the score.
@@ -154,6 +157,72 @@ test('reports the GitHub connection from the options page', async ({ context, ex
   await expect(status).toHaveAttribute('data-kind', 'ok');
 });
 
+test('signs in with the GitHub App, shows the score, and signs out', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context);
+  const posted = await installFakeGitHubLogin(context);
+  const sent: string[] = [];
+  context.on('request', (request) => {
+    if (new URL(request.url()).host === 'api.github.com') {
+      sent.push(request.headers()['authorization'] ?? '');
+    }
+  });
+
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  // A fresh install offers the app first.
+  await expect(options.locator('#mode-app')).toBeChecked();
+  await expect(options.getByLabel('Token', { exact: true })).toBeHidden();
+  await expect(options.locator('#install-link')).toHaveAttribute(
+    'href',
+    'https://github.com/apps/review-ratio/installations/new',
+  );
+
+  await options.getByRole('button', { name: 'Sign in with GitHub' }).click();
+  await expect(options.locator('#user-code')).toHaveText(USER_CODE);
+  await expect(options.getByRole('link', { name: 'Open GitHub' })).toHaveAttribute(
+    'href',
+    'https://github.com/login/device',
+  );
+  await expect(options.locator('#signed-in-login')).toHaveText('dev-e2e', { timeout: 15_000 });
+
+  // The client ID alone: no secret ever goes to GitHub.
+  expect(posted.map((body) => Object.keys(body).sort())).toEqual([
+    ['client_id'],
+    ['client_id', 'device_code', 'grant_type'],
+    ['client_id', 'device_code', 'grant_type'],
+  ]);
+  expect(posted.every((body) => (body['client_id'] ?? '').startsWith('Iv'))).toBe(true);
+
+  await options.getByRole('button', { name: 'Save' }).click();
+  await expect(options.locator('#status')).toContainText('Saved');
+  await expect(options.locator('#status')).not.toContainText('Refreshing the badge');
+  const github = await context.newPage();
+  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await expect(github.locator('#review-ratio-badge .review-ratio-full')).toHaveText(
+    '↑ 400 RP · ↓ 400 RP | Ratio 1.00',
+  );
+  expect(sent.length).toBeGreaterThan(0);
+  expect(new Set(sent)).toEqual(new Set(['Bearer ghu_e2e']));
+
+  await options.bringToFront();
+  await options.getByRole('button', { name: 'Test connection' }).click();
+  await expect(options.locator('#status')).toContainText(
+    'signed in as dev-e2e with the GitHub App',
+  );
+  await expect(options.locator('#status')).toHaveAttribute('data-kind', 'ok');
+  const rows = options.locator('#activity-rows');
+  await expect(rows).toContainText('signed in to GitHub as dev-e2e with the GitHub App');
+  await expect(rows).toContainText('POST github.com/login/oauth/access_token');
+  await expect(options.locator('#activity')).not.toContainText(/ghu_|ghr_|device_e2e/);
+
+  await options.getByRole('button', { name: 'Sign out' }).click();
+  await expect(options.getByRole('button', { name: 'Sign in with GitHub' })).toBeVisible();
+  await expect(options.locator('#app-signed-in')).toBeHidden();
+});
+
 test('injects the content script into an open GitHub tab, as after an update', async ({
   context,
   extensionId,
@@ -210,7 +279,7 @@ test('lists the calls of the last 30 minutes on the options page', async ({
 
   await options.getByRole('button', { name: 'Test connection' }).click();
   await expect(options.locator('#status')).toContainText('token works for dev-e2e');
-  await expect(rows).toContainText('Test connection, on the options page');
+  await expect(rows).toContainText('Test connection, asked by the options page');
   await expect(rows).toContainText('GET api.github.com/user');
   await expect(options.locator('#activity')).not.toContainText('github_pat_e2e');
 

@@ -32,6 +32,30 @@ counts, and the record caps moved as they were, and the scored fixture snapshot 
 Gaming the public weights only changes a badge its owner alone sees. A formula change now ships
 with an extension update; there is no server to retire an old build.
 
+### Sign in with the GitHub App, a token as the fallback
+
+The prototype read GitHub with a pasted fine-grained PAT, and DESIGN.md planned the GitHub App
+for the rollout. The app is now the recommended mode; the PAT stays as the fallback.
+
+- **Device flow, no secret.** The extension cannot keep a secret, so the app has none: the device
+  flow and token renewal need the public client ID alone. No redirect either, so no extra host
+  permission or `identity` API: the calls go to `github.com/login`, already in the manifest.
+- **Expiring tokens.** An access token lasts 8 hours and a leaked one dies by itself. The worker
+  renews it 5 minutes before expiry, and once after a 401 (a token GitHub revoked early), then
+  retries the call once. Concurrent callers share one renewal, so a refresh token, which GitHub
+  rotates on each use, is never spent twice. A renewal that cannot reach GitHub keeps the stored
+  tokens; one GitHub refuses signs out.
+- **The worker runs the flow.** The device code stays in its memory, and polling survives the
+  options page closing. The page reads the state from `chrome.storage.session`. A worker restart
+  ends the flow: the page then asks to sign in again, rather than storing the device code.
+- **One mode at a time.** Signing in clears a pasted token; saving a pasted token signs out. A
+  sign-in or sign-out made while a renewal is in flight wins over it.
+- **Test connection in the worker.** It needs the app token, which only the worker renews, so the
+  options page asks the worker. With the app, it also checks the installation on the organisation
+  (`/user/installations`), and links an owner to the install page when it is missing.
+- **Placeholder builds.** A fork whose `app-config.ts` holds a `REPLACE_WITH_…` placeholder offers
+  the token mode only, without calling GitHub.
+
 ## Deviations from the design
 
 ### The badge refreshes at most every 5 minutes
@@ -279,8 +303,8 @@ question below.
 | `ok`           | last refresh succeeded                              | the ratio, coloured                    |
 | `stale`        | the refresh failed otherwise (classification limit) | last ratio greyed, `stale since HH:MM` |
 | `github_error` | GitHub failed, rate limited, or refused             | same as `stale`                        |
-| `bad_token`    | GitHub answered 401                                 | `review-ratio: token rejected`         |
-| `no_token`     | no token yet                                        | `review-ratio: set up`                 |
+| `bad_token`    | GitHub answered 401 (with the app: after a renewal) | `review-ratio: token rejected`         |
+| `no_token`     | no token yet, not signed in, or signed out          | `review-ratio: set up`                 |
 
 ### Limits
 
