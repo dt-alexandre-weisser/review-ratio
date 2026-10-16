@@ -16,6 +16,8 @@ First prototype.
   isolation, rate-limit back-off; token hidden from content scripts.
 - Activity log on the options page: every call of the last 30 minutes with its time, status and
   duration, plus refresh start and end lines; live, copyable, kept in memory only.
+- The badge floats in the bottom-right corner when GitHub's header is not recognised, instead of
+  not showing; the options page says where the badge went and shows the header it saw.
 - CI: format, lint, typecheck (scripts included), unit and contract tests with per-package
   coverage thresholds, released-pin comparison with `main`, build, end-to-end tests in Chromium,
   Docker image smoke test.

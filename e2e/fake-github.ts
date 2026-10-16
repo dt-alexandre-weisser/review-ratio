@@ -86,7 +86,12 @@ function json(route: Route, body: unknown, status = 200) {
 export interface FakeGitHubOptions {
   /** Answer 401 to every API call. */
   rejectToken?: boolean;
+  /** Serve pages whose header has none of the containers the badge knows, as after a redesign. */
+  unknownHeader?: boolean;
 }
+
+const APP_HEADER = `<header class="AppHeader"><div class="AppHeader-globalBar"><div class="AppHeader-globalBar-end"><button>bell</button></div></div></header>`;
+const UNKNOWN_HEADER = `<header class="GlobalNav" role="banner"><div class="GlobalNav-end"><a href="/notifications">bell</a></div></header>`;
 
 export async function installFakeGitHub(context: BrowserContext, options: FakeGitHubOptions = {}) {
   await context.route('https://github.com/**', (route) =>
@@ -94,7 +99,7 @@ export async function installFakeGitHub(context: BrowserContext, options: FakeGi
       status: 200,
       contentType: 'text/html',
       body: `<!doctype html><html><head><title>GitHub</title></head><body>
-        <header class="AppHeader"><div class="AppHeader-globalBar"><div class="AppHeader-globalBar-end"><button>bell</button></div></div></header>
+        ${options.unknownHeader ? UNKNOWN_HEADER : APP_HEADER}
         <main><h1>Fake GitHub</h1></main></body></html>`,
     }),
   );

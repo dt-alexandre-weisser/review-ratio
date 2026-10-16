@@ -80,9 +80,14 @@ options page has **Refresh badge now** and shows the last score and error.
 
 ### Where the badge is
 
-In the top bar of github.com, on the right, first in the group of search box and icons. It needs
-GitHub's signed-in header: signed-out pages have none. At a window width of 1,280 px or less it
-shortens to `Ratio 1.49`, and below 768 px it hides, as GitHub's header has no room left.
+In the top bar of github.com, on the right, first in the group of search box and icons. At a
+window width of 1,280 px or less it shortens to `Ratio 1.49`, and below 768 px it hides, as
+GitHub's header has no room left.
+
+GitHub changes its header markup without notice. When the badge cannot find its place in the
+header, it floats in the bottom-right corner of the page instead of disappearing. The options
+page then says so under **On github.com**, and shows the structure of the header it saw (tags and
+classes only) to send to the maintainers, so the badge can go back in the header.
 
 ### Activity log
 

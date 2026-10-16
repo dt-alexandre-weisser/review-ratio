@@ -237,3 +237,21 @@ dd {
 #activity tr[data-failed='true'] td:nth-child(3) {
   color: var(--danger);
 }
+
+#diag-header-wrap {
+  margin-top: 12px;
+}
+
+#diag-header-wrap summary {
+  cursor: pointer;
+  color: var(--warn);
+}
+
+#diag-header {
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}

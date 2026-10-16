@@ -124,6 +124,23 @@ describe('background worker', () => {
     });
   });
 
+  it('records where a GitHub tab put the badge', async () => {
+    const placed = { type: 'badge:placed', placement: 'floating', header: 'header.New' };
+    expect(await send(placed, fromGitHub)).toEqual({ type: 'ok' });
+    expect(session.data['badgePlacement']).toMatchObject({
+      placement: 'floating',
+      header: 'header.New',
+    });
+    const entries = await readActivity(session, Date.now());
+    expect(entries[0]).toMatchObject({
+      kind: 'event',
+      message: "badge shown in the bottom-right corner: GitHub's header was not found",
+    });
+    expect(
+      await send({ ...placed, placement: 'header' }, { id: ID, url: 'https://evil.example/' }),
+    ).toEqual({ type: 'error', message: 'not allowed' });
+  });
+
   it('ignores messages that are not requests', async () => {
     expect(await send({ type: 'hello' }, fromOptions)).toBeUndefined();
   });

@@ -56,6 +56,7 @@ test('shows the ratio in the GitHub header and sends numbers only', async ({
   await expect(badge.locator('.review-ratio-full')).toHaveText('↑ 400 RP · ↓ 400 RP | Ratio 1.00');
   await expect(badge).toHaveAttribute('data-tone', 'good');
   await expect(badge).toHaveAttribute('data-stale', 'false');
+  await expect(badge).toHaveAttribute('data-placement', 'header');
   await expect(badge).toHaveAttribute('title', /given \/ asked/);
 
   // The pinned manifest key gives every install the same id: it says nothing about the machine.
@@ -209,4 +210,37 @@ test('lists the calls of the last 30 minutes on the options page', async ({
   await options.getByRole('button', { name: 'Forget local activity data' }).click();
   await expect(options.locator('#activity-summary')).toHaveText('No calls in the last 30 minutes.');
   await expect(rows.locator('tr')).toHaveCount(0);
+});
+
+test('floats the badge when the GitHub header is not recognised, and says so', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context, { unknownHeader: true });
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+
+  const github = await context.newPage();
+  await github.setViewportSize({ width: 1400, height: 800 });
+  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  const badge = github.locator('#review-ratio-badge');
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute('data-placement', 'floating');
+  await expect(badge.locator('.review-ratio-full')).toHaveText(/Ratio 1\.00/);
+  const box = (await badge.boundingBox())!;
+  expect(box.x + box.width).toBeGreaterThan(1300);
+  expect(box.y + box.height).toBeGreaterThan(700);
+
+  await options.bringToFront();
+  await expect(options.locator('#diag-placement')).toContainText(
+    "bottom-right corner: GitHub's header was not found",
+  );
+  await expect(options.locator('#diag-header-wrap')).toBeVisible();
+  await options.locator('#diag-header-wrap summary').click();
+  await expect(options.locator('#diag-header')).toHaveText(
+    ['header.GlobalNav', '  div.GlobalNav-end', '    a'].join('\n'),
+  );
+  await expect(options.locator('#activity-rows')).toContainText(
+    "badge shown in the bottom-right corner: GitHub's header was not found",
+  );
 });

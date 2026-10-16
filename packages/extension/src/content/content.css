@@ -44,8 +44,21 @@
   }
 }
 
+/* GitHub's narrow header has no room left; a floating badge stays. */
 @media (max-width: 767px) {
-  .review-ratio-badge {
+  .review-ratio-badge[data-placement='header'] {
     display: none;
   }
+}
+
+/* GitHub's header was not found: bottom-right corner, above the page. */
+.review-ratio-badge[data-placement='floating'] {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 999;
+  margin: 0;
+  padding: 5px 10px;
+  background: var(--bgColor-default, var(--color-canvas-default, #ffffff));
+  box-shadow: var(--shadow-floating-small, 0 1px 3px rgba(31, 35, 40, 0.12));
 }

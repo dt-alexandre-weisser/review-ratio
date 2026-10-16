@@ -14,8 +14,11 @@ describe('isTrustedFor', () => {
     }
   });
 
-  it('lets the github.com content script ask for the badge only', () => {
+  it('lets the github.com content script ask for the badge and report its place only', () => {
     expect(isTrustedFor({ type: 'badge:get' }, github, ID, ORIGIN)).toBe(true);
+    const placed = { type: 'badge:placed', placement: 'floating', header: '' } as const;
+    expect(isTrustedFor(placed, github, ID, ORIGIN)).toBe(true);
+    expect(isTrustedFor(placed, { id: ID, url: 'https://evil.example/' }, ID, ORIGIN)).toBe(false);
     expect(isTrustedFor({ type: 'badge:refresh' }, github, ID, ORIGIN)).toBe(false);
     expect(isTrustedFor({ type: 'cache:get' }, github, ID, ORIGIN)).toBe(false);
   });

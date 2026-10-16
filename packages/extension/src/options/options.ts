@@ -13,6 +13,7 @@ import {
   type ActivityEntry,
 } from '../lib/activity-log.ts';
 import { diagnose } from '../lib/diagnose.ts';
+import { clearPlacement, readPlacement } from '../lib/placement.ts';
 import type { Request, Response } from '../lib/messages.ts';
 import {
   DEFAULT_SETTINGS,
@@ -23,6 +24,7 @@ import {
   type Settings,
 } from '../lib/settings.ts';
 import { Store, chromeStorageArea, type BadgeCache } from '../lib/storage.ts';
+import { localTime } from '../lib/time.ts';
 
 const store = new Store(chromeStorageArea());
 const sessionArea = chromeSessionArea();
@@ -92,6 +94,23 @@ function describeCache(cache: BadgeCache): void {
     ? new Date(cache.scoredAt).toLocaleString()
     : 'never';
   el('diag-error', HTMLElement).textContent = cache.error ?? '—';
+}
+
+async function showPlacement(): Promise<void> {
+  const report = await readPlacement(sessionArea);
+  const where = el('diag-placement', HTMLElement);
+  const details = el('diag-header-wrap', HTMLDetailsElement);
+  if (!report) {
+    where.textContent = 'no badge yet: open or reload a github.com page';
+    details.hidden = true;
+    return;
+  }
+  where.textContent =
+    report.placement === 'header'
+      ? `in the GitHub header (${localTime(report.at)})`
+      : `bottom-right corner: GitHub's header was not found (${localTime(report.at)})`;
+  details.hidden = report.placement !== 'floating';
+  el('diag-header', HTMLPreElement).textContent = report.header;
 }
 
 async function showDiagnostics(): Promise<void> {
@@ -184,6 +203,9 @@ function scheduleActivity(): void {
   activityQueued = true;
   setTimeout(() => {
     activityQueued = false;
+    showPlacement().catch((error: unknown) => {
+      console.warn('[review-ratio] cannot read the badge placement', error);
+    });
     showActivity().catch((error: unknown) => {
       activitySummary.textContent = `Cannot read the activity log: ${error instanceof Error ? error.message : String(error)}`;
     });
@@ -241,11 +263,13 @@ buttons.forget.addEventListener('click', () => {
   void busy(buttons.forget, async () => {
     await store.clearActivity();
     await clearActivity(sessionArea);
+    await clearPlacement(sessionArea);
     setStatus(
       'ok',
       'Forgot the cached badge, class globs, PR keys, Viewed snapshots and the activity log. Settings kept.',
     );
     await showDiagnostics();
+    await showPlacement();
     await showActivity();
   });
 });
@@ -288,5 +312,6 @@ orgInput.addEventListener('input', () => {
 void (async () => {
   fillForm(await store.getSettings());
   await showDiagnostics();
+  await showPlacement();
   await showActivity();
 })();

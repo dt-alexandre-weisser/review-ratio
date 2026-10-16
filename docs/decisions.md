@@ -185,6 +185,18 @@ question below.
 - Without a token, the skipped refresh is logged once, when the token goes away, not on every
   page load.
 
+### Badge placement
+
+- The badge goes first in `.AppHeader-globalBar-end`, else in `.AppHeader-actions`, skipping a
+  container GitHub hides. It never goes in a bare `header`, which could be page content.
+- When neither is on the page 3 seconds after the content script starts, the badge floats in the
+  bottom-right corner rather than staying invisible. It moves into the header as soon as one
+  shows up, on GitHub's soft navigation or the 5-second remount check.
+- The content script reports each change of placement to the worker. When the badge floats, it
+  also sends the header's structure: tag names, ids and the first four classes of up to 40 nodes,
+  no text and no links, at most 2,000 characters. The options page shows it, and the activity log
+  records the change.
+
 ### Badge states
 
 | Status             | Cause                                   | Badge                                  |

@@ -7,6 +7,7 @@ import { badgeView } from '../lib/badge-state.ts';
 import { createGitHubClient } from '../lib/github/client.ts';
 import { isRequest, type BadgeUpdate, type Request, type Response } from '../lib/messages.ts';
 import { refresh, refreshIfDue, type RefreshDeps } from '../lib/refresh.ts';
+import { recordPlacement } from '../lib/placement.ts';
 import { createServerClient } from '../lib/server-client.ts';
 import { Store, chromeStorageArea } from '../lib/storage.ts';
 import { isTrustedFor } from './senders.ts';
@@ -16,7 +17,8 @@ const KEEP_ALIVE_MS = 20_000;
 const GITHUB_TABS = 'https://github.com/*';
 
 const store = new Store(chromeStorageArea());
-const activity = new ActivityLog(chromeSessionArea(), {
+const session = chromeSessionArea();
+const activity = new ActivityLog(session, {
   onError: (error) => {
     console.warn('[review-ratio] cannot write the activity log', error);
   },
@@ -118,6 +120,14 @@ async function handle(request: Request): Promise<Response> {
     }
     case 'cache:get':
       return { type: 'cache', cache: await store.getBadge() };
+    case 'badge:placed':
+      await recordPlacement(session, activity, {
+        placement: request.placement,
+        header: request.header,
+        at: Date.now(),
+      });
+      await activity.flush();
+      return { type: 'ok' };
   }
 }
 

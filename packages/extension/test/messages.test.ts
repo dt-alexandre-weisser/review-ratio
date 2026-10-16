@@ -10,6 +10,15 @@ describe('message guards', () => {
     expect(isRequest({ type: 'badge:refresh' })).toBe(true);
     expect(isRequest({ type: 'cache:get' })).toBe(true);
     expect(isRequest({ type: 'settings:steal' })).toBe(false);
+    expect(isRequest({ type: 'badge:placed', placement: 'header', header: '' })).toBe(true);
+    expect(isRequest({ type: 'badge:placed', placement: 'floating', header: 'header.x' })).toBe(
+      true,
+    );
+    expect(isRequest({ type: 'badge:placed', placement: 'sidebar', header: '' })).toBe(false);
+    expect(isRequest({ type: 'badge:placed', placement: 'header' })).toBe(false);
+    expect(
+      isRequest({ type: 'badge:placed', placement: 'floating', header: 'x'.repeat(2001) }),
+    ).toBe(false);
     expect(isRequest(null)).toBe(false);
     expect(isRequest('badge:get')).toBe(false);
   });

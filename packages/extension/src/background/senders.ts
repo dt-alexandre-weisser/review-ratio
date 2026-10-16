@@ -8,8 +8,8 @@ export interface Sender {
 
 /**
  * Who may send what. Content scripts on github.com may only ask for the badge, which refreshes at
- * most every 10 minutes. Forcing a refresh or reading the diagnostics is for the extension's own
- * pages (the options page).
+ * most every 10 minutes, and say where they put it. Forcing a refresh or reading the diagnostics
+ * is for the extension's own pages (the options page).
  */
 export function isTrustedFor(
   request: Request,
@@ -22,5 +22,5 @@ export function isTrustedFor(
     typeof sender.url === 'string' && sender.url.startsWith(extensionOrigin);
   if (fromExtensionPage) return true;
   const fromGitHub = typeof sender.url === 'string' && sender.url.startsWith('https://github.com/');
-  return fromGitHub && request.type === 'badge:get';
+  return fromGitHub && (request.type === 'badge:get' || request.type === 'badge:placed');
 }
