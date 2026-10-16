@@ -187,25 +187,35 @@ question below.
 
 ### Badge placement
 
-- The badge goes just left of the header's search bar: before the search's item in the nearest
-  flex row above it. The search is found by GitHub's markup (`.AppHeader-search`,
-  `qbsearch-input`…) or, after a redesign, by a header control whose label says "search". Then
-  `.AppHeader-globalBar-end` and `.AppHeader-actions`, first position. Never a bare `header` inside
-  the page content.
-- Each place is checked after the badge is put there: visible through `display`, `visibility` and
-  `opacity`, not empty, not clipped out of its container. A place that fails is not tried again
-  on that page. Nothing hides the badge at narrow widths; it shortens to the ratio instead.
+- The header is found by priority, not document order: GitHub's React header of 2026
+  (`header.GlobalNav`), its `aria-label`, the AppHeader of 2023–2025, then landmarks.
+- The badge goes just left of the search: before the search's item in the nearest flex row above
+  it. The 2026 search is a Primer button group (search box, command palette); the badge goes
+  before the whole group, never inside it, which would square the search box's corners. Button
+  groups and rows of empty items are never taken for the row. After a redesign, the search is a
+  visible header control labelled "search", else one whose text says so. Then
+  `.AppHeader-globalBar-end` and `.AppHeader-actions`, first position.
+- Each place is checked after the badge is put there, with the header style applied: visible
+  through `display`, `visibility` and `opacity`, not empty, not clipped out of its container. A
+  hidden container (GitHub hides the whole header on its search page) is skipped, not rejected. A
+  container that clips the badge is not tried again until the next navigation or resize. Nothing
+  hides the badge at narrow widths; it shortens to the ratio instead.
+- The first placement waits for the page's `load` and an idle moment, after GitHub hydrates its
+  React header, which would otherwise throw the badge away.
 - When no place works 3 seconds after the page loads or GitHub navigates, the badge floats in the
-  bottom-right corner, on signed-in pages only (`meta[name="user-login"]` or `body.logged-in`,
-  GitHub's own signals). It moves into the header as soon as a place appears.
+  bottom-right corner, and moves into the header as soon as a place appears.
+- Signed-out, sign-in and sudo pages show no badge (no `meta[name="user-login"]` and no
+  `body.logged-in`, GitHub's own signals).
 - ↑ and ↓ use `--fgColor-success` and `--fgColor-danger`, the colours of GitHub's added and removed
-  line counts, which follow the user's theme, colour-blind themes included.
+  line counts, which follow the user's theme: green and red in light and dark, blue and orange in
+  the colour-blind themes. The diff-specific `--diffBlob-*-fgColor` tokens resolve to the default
+  text colour, so they would not colour anything.
 - The content script reports each change of placement. When the badge floats it also sends what
-  it saw: the path from the search control up to the header with each level's `display`, and the
-  header's tree (tags, ids, first four classes, 80 nodes, no SVG internals, no text, no links,
-  2,000 characters). The worker accepts only that alphabet. It keeps the latest report and the
-  last floating one apart, writes them one at a time, and logs at most one placement line every
-  10 seconds.
+  it saw: the path from the search up to the header with each level's `display`, and the header's
+  tree (tags, ids, first four classes, 80 nodes, no SVG internals, no text, no links, 2,000
+  characters). The worker accepts only that alphabet. It keeps the latest report and the last
+  floating one apart, writes them one at a time, and logs at most one placement line every
+  2 seconds.
 
 ### Badge states
 

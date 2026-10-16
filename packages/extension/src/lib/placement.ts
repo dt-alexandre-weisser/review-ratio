@@ -7,8 +7,11 @@ import type { ActivityLog, LogArea } from './activity-log.ts';
 import { MAX_HEADER_TEXT, type Placement } from './messages.ts';
 
 const KEY = 'badgePlacement';
-/** At most one placement line in the activity log per interval, whatever the tabs report. */
-export const LOG_EVERY_MS = 10_000;
+/**
+ * At most one placement line in the activity log per interval, whatever the tabs report: a
+ * compromised page flipping placements cannot push the calls out of the log.
+ */
+export const LOG_EVERY_MS = 2_000;
 
 export interface PlacementReport {
   placement: Placement;

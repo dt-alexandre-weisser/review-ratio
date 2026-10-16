@@ -37,7 +37,7 @@ does without DevTools.
   the content script saw of the header: tag names, ids, classes and layout, never page text or
   links. A content script may send only that report and the request for the badge. The worker
   accepts a report of at most 2,000 characters made of letters, digits and `_ - . # : [ ]`, so
-  no markup, quotes or links, and logs at most one placement line every 10 seconds.
+  no markup, quotes or links, and logs at most one placement line every 2 seconds.
 
 ## What leaves the browser
 

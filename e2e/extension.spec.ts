@@ -58,9 +58,11 @@ test('shows the ratio in the GitHub header and sends numbers only', async ({
   await expect(badge).toHaveAttribute('data-stale', 'false');
   await expect(badge).toHaveAttribute('data-placement', 'header');
   await expect(badge).toHaveAttribute('title', /given \/ asked/);
-  // Just left of the search bar, in the header's own row.
+  // Just left of the search box, in the header's own row, outside GitHub's search group.
   await expect(
-    github.locator('.AppHeader-globalBar-end > #review-ratio-badge + .AppHeader-search'),
+    github.locator(
+      '[data-testid="top-nav-center"] > #review-ratio-badge + [data-component="ButtonGroup"]',
+    ),
   ).toHaveCount(1);
   // ↑ and ↓ in GitHub's colours for added and removed lines, from the theme when it sets them.
   const up = badge.locator('.review-ratio-up');
@@ -291,8 +293,41 @@ test('floats the badge when the GitHub header has no place for it, and says so',
   );
 });
 
-test('shows no floating badge on signed-out pages', async ({ context, extensionId }) => {
-  await installFakeGitHub(context, { header: 'unknown', signedOut: true });
+test('places the badge left of the search bar of the 2023–2025 header', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context, { header: 'app' });
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+  const github = await context.newPage();
+  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await expect(
+    github.locator('.AppHeader-globalBar-end > #review-ratio-badge + .AppHeader-search'),
+  ).toHaveCount(1);
+});
+
+test('moves a floating badge into the header once GitHub shows it', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context, { headerShowsAfterMs: 6_000 });
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+  const github = await context.newPage();
+  await github.goto('https://github.com/search');
+  const badge = github.locator('#review-ratio-badge');
+  await expect(badge).toHaveAttribute('data-placement', 'floating');
+  await expect(badge).toHaveAttribute('data-placement', 'header', { timeout: 15_000 });
+  await expect(
+    github.locator(
+      '[data-testid="top-nav-center"] > #review-ratio-badge + [data-component="ButtonGroup"]',
+    ),
+  ).toHaveCount(1);
+});
+
+test('shows no badge on signed-out pages', async ({ context, extensionId }) => {
+  await installFakeGitHub(context, { signedOut: true });
   const options = await context.newPage();
   await configure(options, extensionId, { token: 'github_pat_e2e' });
   const github = await context.newPage();

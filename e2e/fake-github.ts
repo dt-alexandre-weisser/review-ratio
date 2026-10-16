@@ -87,16 +87,33 @@ export interface FakeGitHubOptions {
   /** Answer 401 to every API call. */
   rejectToken?: boolean;
   /**
-   * The header of the pages: GitHub's AppHeader (default), a redesign with unknown classes but a
-   * search button, or one with neither.
+   * The header of the pages: GitHub's React header of 2026 (default), the AppHeader of 2023–2025,
+   * a redesign with unknown classes but a search button, or one with neither.
    */
-  header?: 'app' | 'redesigned' | 'unknown';
+  header?: 'globalnav' | 'app' | 'redesigned' | 'unknown';
   /** Serve pages without GitHub's signed-in signals. */
   signedOut?: boolean;
+  /** Hide the header at first and show it after this long, as GitHub's search page does. */
+  headerShowsAfterMs?: number;
 }
 
 const ROW = 'display:flex;align-items:center;gap:8px';
 const HEADERS = {
+  // From an archived github.com page and GitHub's bundles, October 2026: Primer stacks, the search
+  // box a button group (search, command palette) in the centre row.
+  globalnav: `<header class="GlobalNav" aria-label="Global navigation menu" data-component="Stack">
+    <div data-component="Stack" style="${ROW};justify-content:space-between;padding:12px">
+      <div data-testid="top-nav-left" style="${ROW}"><button aria-label="Open menu">=</button><a aria-label="Dashboard" href="/">logo</a></div>
+      <div data-testid="top-nav-center" style="${ROW};flex:1">
+        <nav aria-label="Breadcrumbs"><a href="/DiliTrust">DiliTrust</a> / <a href="/DiliTrust/top-secret-repo">top-secret-repo</a></nav>
+        <div class="Search-module__searchButtonGroup__aetw5" data-component="ButtonGroup" style="display:flex;margin-left:auto">
+          <div><button class="Search-module__searchButton__aiE0a" aria-label="Open quick search dialog, type / to search" style="border-radius:6px 0 0 6px">Type / to search</button></div>
+          <div><button aria-label="Command palette" style="border-radius:0 6px 6px 0">&gt;</button></div>
+        </div>
+      </div>
+      <div data-testid="top-nav-right" style="${ROW}"><button aria-label="Chat with Copilot">copilot</button><button>+</button><a href="/notifications">inbox</a></div>
+    </div>
+  </header>`,
   app: `<header class="AppHeader" role="banner">
     <div class="AppHeader-globalBar" style="${ROW};justify-content:space-between;padding:12px">
       <div class="AppHeader-globalBar-start" style="${ROW}"><a href="/">logo</a><span class="AppHeader-context-full">DiliTrust / top-secret-repo</span></div>
@@ -125,7 +142,12 @@ export async function installFakeGitHub(context: BrowserContext, options: FakeGi
       body: `<!doctype html><html><head><title>GitHub</title>
         ${options.signedOut ? '' : `<meta name="user-login" content="${ME}">`}
         </head><body class="${options.signedOut ? 'logged-out' : 'logged-in'}">
-        ${HEADERS[options.header ?? 'app']}
+        ${
+          options.headerShowsAfterMs === undefined
+            ? HEADERS[options.header ?? 'globalnav']
+            : `<div id="late" style="display:none">${HEADERS[options.header ?? 'globalnav']}</div>
+               <script>setTimeout(() => { document.getElementById('late').style.display = ''; }, ${options.headerShowsAfterMs});</script>`
+        }
         <main><h1>Fake GitHub</h1></main></body></html>`,
     }),
   );

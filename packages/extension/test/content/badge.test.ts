@@ -5,7 +5,9 @@ import {
   BADGE_ID,
   candidateSpots,
   describeHeader,
+  findHeader,
   findSearch,
+  forgetRejections,
   isSignedIn,
   mount,
   searchSpot,
@@ -39,7 +41,28 @@ const APP_HEADER = `
     </div>
   </header>`;
 
+/**
+ * GitHub's React header of 2026, from an archived page and GitHub's bundles: the search box is a
+ * button group (search, command palette) in the centre row.
+ */
+const GLOBAL_NAV = `
+  <header class="GlobalNav" aria-label="Global navigation menu" data-component="Stack">
+    <div class="prc-Stack-Stack" data-component="Stack" style="display:flex">
+      <div data-testid="top-nav-left" style="display:flex"><button aria-label="Open menu">=</button></div>
+      <div data-testid="top-nav-center" id="center" style="display:flex">
+        <nav aria-label="Breadcrumbs"><a href="/DiliTrust">DiliTrust</a></nav>
+        <div class="Search-module__searchButtonGroup__aetw5" data-component="ButtonGroup" id="group" style="display:flex">
+          <div class="prc-ButtonGroup-Item"><button class="Search-module__searchButton__aiE0a" aria-label="Open quick search dialog, type / to search">Type / to search</button></div>
+          <div class="prc-ButtonGroup-Item"></div>
+        </div>
+        <button class="Search-module__smallSearchButton" aria-label="Open quick search dialog">S</button>
+      </div>
+      <div data-testid="top-nav-right" style="display:flex"><button aria-label="Chat with Copilot">c</button></div>
+    </div>
+  </header>`;
+
 beforeEach(() => {
+  forgetRejections();
   document.body.innerHTML = '';
   document.body.className = '';
   document.head.innerHTML = '';
@@ -56,6 +79,41 @@ describe('finding the search bar', () => {
     expect(placement).toBe('header');
     expect(el.parentElement?.id).toBe('end');
     expect(el.nextElementSibling?.id).toBe('search');
+  });
+
+  it("puts the badge before GitHub's 2026 search group, never inside it", () => {
+    document.body.innerHTML = `<main><header id="content-header">A post</header></main>${GLOBAL_NAV}`;
+    expect(findHeader(document)?.className).toBe('GlobalNav');
+    expect(findSearch(findHeader(document)!)?.id).toBe('group');
+    const { el } = mount(document, view, always)!;
+    expect(el.parentElement?.id).toBe('center');
+    expect(el.nextElementSibling?.id).toBe('group');
+  });
+
+  it('never takes a button group, or a row of empty items, for the row', () => {
+    document.body.innerHTML = `
+      <header>
+        <div class="Row" style="display:flex">
+          <a href="/">logo</a>
+          <div role="group" class="Group" style="display:flex">
+            <span class="Item" style="display:flex"><button aria-label="Search">s</button><span></span></span>
+            <span></span>
+          </div>
+        </div>
+      </header>`;
+    const spot = searchSpot(document)!;
+    expect((spot.container as HTMLElement).className).toBe('Row');
+    expect((spot.before as HTMLElement).className).toBe('Group');
+  });
+
+  it('prefers a control labelled search to one whose text mentions it', () => {
+    document.body.innerHTML = `
+      <header style="display:flex">
+        <button>Research notes</button><button>Advanced search tips</button><input placeholder="Search">
+      </header>`;
+    expect(findSearch(findHeader(document)!)?.tagName).toBe('INPUT');
+    document.body.innerHTML = '<header><button>Advanced search tips</button></header>';
+    expect(findSearch(findHeader(document)!)?.textContent).toBe('Advanced search tips');
   });
 
   it('finds a redesigned search by its words, and climbs to the nearest row', () => {
@@ -111,6 +169,23 @@ describe('placing the badge', () => {
     expect(el.parentElement?.firstElementChild).toBe(el);
     // The rejected row is not tried again.
     expect(candidateSpots(document).map((s) => s.container.id)).toEqual(['actions']);
+  });
+
+  it('skips a hidden header without rejecting it, and uses it once it shows', () => {
+    document.body.innerHTML = GLOBAL_NAV;
+    const center = document.getElementById('center')!;
+    center.checkVisibility = () => false;
+    expect(mount(document, view, always)).toBeNull();
+    center.checkVisibility = () => true;
+    expect(mount(document, view, always)?.el.parentElement).toBe(center);
+  });
+
+  it('tries a rejected place again after a navigation or a resize', () => {
+    document.body.innerHTML = GLOBAL_NAV;
+    expect(mount(document, view, { shows: () => false })).toBeNull();
+    expect(candidateSpots(document)).toEqual([]);
+    forgetRejections();
+    expect(mount(document, view, always)?.el.parentElement?.id).toBe('center');
   });
 
   it('floats when nothing in the header shows it, once allowed', () => {

@@ -80,7 +80,7 @@ options page has **Refresh badge now** and shows the last score and error.
 
 ### Where the badge is
 
-In the github.com header, just left of the search bar, in the header's own row: it moves with
+In the github.com header, just left of the search box, in the header's own row: it moves with
 GitHub's layout. At a window width of 1,280 px or less it shortens to `Ratio 1.49`. ↑ takes the
 colour GitHub gives added lines and ↓ the colour of removed lines, from your theme, so colour-blind
 themes apply. The ratio is green, grey or amber. Signed-out pages show no badge.

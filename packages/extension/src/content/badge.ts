@@ -12,11 +12,26 @@ import { MAX_HEADER_TEXT, type Placement } from '../lib/messages.ts';
 
 export const BADGE_ID = 'review-ratio-badge';
 
-/** GitHub's global header: the first one on the page. */
-const HEADER = 'header.AppHeader, header[role="banner"], [role="banner"], header';
+/**
+ * GitHub's global header, most specific first: the React header of 2026, the AppHeader of
+ * 2023–2025, then generic landmarks. Tried in this order, not in document order, so an earlier
+ * unrelated `header` never wins over a known one.
+ */
+const HEADER_SELECTORS = [
+  'header.GlobalNav',
+  'header[aria-label="Global navigation menu"]',
+  'header.AppHeader',
+  'header[role="banner"]',
+  '[role="banner"]',
+  'header',
+];
 
-/** The header's search control, most specific first. */
+/**
+ * The header's search, most specific first. The 2026 header's search is a button group (search
+ * box and command palette): the badge goes before the whole group, never inside it.
+ */
 const SEARCH_SELECTORS = [
+  '[class*="Search-module__searchButtonGroup"]',
   '.AppHeader-search',
   'qbsearch-input',
   '[data-target="qbsearch-input.inputButton"]',
@@ -24,14 +39,24 @@ const SEARCH_SELECTORS = [
   '[role="search"]',
 ];
 
+/** Groups that style their items as one control: never a row for the badge. */
+const GROUPS = '[data-component="ButtonGroup"], [role="group"]';
+
 /** Header containers to fall back to, first position. */
 const SLOT_SELECTORS = ['.AppHeader-globalBar-end', '.AppHeader-actions'];
 
 /** The view last rendered into each badge element, to skip identical re-renders. */
 const rendered = new WeakMap<Element, string>();
 
-/** Containers that were tried and could not show the badge (hidden, clipped). */
-const rejected = new WeakSet<Element>();
+/**
+ * Containers that showed but clipped the badge. Forgotten on navigation and resize, when GitHub's
+ * layout may have changed.
+ */
+let rejected = new WeakSet<Element>();
+
+export function forgetRejections(): void {
+  rejected = new WeakSet<Element>();
+}
 
 /** A place in the page: inside `container`, before `before`, or first when `before` is null. */
 export interface Spot {
@@ -40,29 +65,59 @@ export interface Spot {
 }
 
 export function findHeader(doc: Document): Element | null {
-  return doc.querySelector(HEADER);
-}
-
-/** The search control of the header, by GitHub's markup, else any control that says "search". */
-export function findSearch(header: Element): Element | null {
-  for (const selector of SEARCH_SELECTORS) {
-    const el = header.querySelector(selector);
+  for (const selector of HEADER_SELECTORS) {
+    const el = doc.querySelector(selector);
     if (el) return el;
-  }
-  for (const el of header.querySelectorAll('button, input, [role="button"], [role="combobox"]')) {
-    const label = [
-      el.getAttribute('aria-label'),
-      el.getAttribute('placeholder'),
-      el.textContent,
-    ].join(' ');
-    if (/\bsearch\b/i.test(label)) return el;
   }
   return null;
 }
 
+/**
+ * Not hidden: `checkVisibility` where the DOM has it (Chrome; not jsdom). A `display: contents`
+ * element has no box, so it counts as visible when its parent is.
+ */
+function isVisible(el: Element): boolean {
+  if (typeof el.checkVisibility !== 'function' || el.checkVisibility()) return true;
+  const parent = el.parentElement;
+  return getComputedStyle(el).display === 'contents' && parent !== null && isVisible(parent);
+}
+
+const SEARCH_WORD = /\bsearch\b/i;
+
+/**
+ * The search of the header, by GitHub's markup, else a visible control whose label says
+ * "search", else one whose text does.
+ */
+export function findSearch(header: Element): Element | null {
+  for (const selector of SEARCH_SELECTORS) {
+    const el = header.querySelector(selector);
+    if (el) return el.closest(GROUPS) ?? el;
+  }
+  const controls = [
+    ...header.querySelectorAll('button, input, [role="button"], [role="combobox"]'),
+  ].filter(isVisible);
+  const labelled = controls.find((el) =>
+    SEARCH_WORD.test(
+      `${el.getAttribute('aria-label') ?? ''} ${el.getAttribute('placeholder') ?? ''}`,
+    ),
+  );
+  const found = labelled ?? controls.find((el) => SEARCH_WORD.test(el.textContent));
+  return found ? (found.closest(GROUPS) ?? found) : null;
+}
+
 function isRow(el: Element): boolean {
+  if (el.matches(GROUPS)) return false;
   const { display } = getComputedStyle(el);
   return display === 'flex' || display === 'inline-flex';
+}
+
+/** Another item of the row than `item`: not the badge, not empty. */
+function isOtherItem(child: Element, item: Element): boolean {
+  return (
+    child !== item &&
+    child.id !== BADGE_ID &&
+    child.childElementCount + child.textContent.trim().length > 0
+  );
 }
 
 /**
@@ -75,7 +130,7 @@ export function searchSpot(doc: Document): Spot | null {
   if (!header || !search) return null;
   let item: Element = search;
   for (let row = search.parentElement; row && row !== header; row = row.parentElement) {
-    if (isRow(row) && [...row.children].some((c) => c !== item && c.id !== BADGE_ID)) {
+    if (isRow(row) && [...row.children].some((c) => isOtherItem(c, item))) {
       return { container: row, before: item };
     }
     item = row;
@@ -106,7 +161,7 @@ function isAt(el: Element, spot: Spot): boolean {
  * `opacity` up its ancestors, not empty, and not entirely clipped out of its container.
  */
 export function badgeShows(el: HTMLElement, container: Element): boolean {
-  if (!el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+  if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
   const badge = el.getBoundingClientRect();
   if (badge.width === 0 || badge.height === 0) return false;
   const box = container.getBoundingClientRect();
@@ -194,18 +249,29 @@ export function mount(doc: Document, view: BadgeView, options: MountOptions = {}
   }
   // Text first: an empty badge has no size, and would never be seen to show.
   render(el, view);
+  const wasFloating = el.dataset['placement'] === 'floating';
 
   for (const spot of candidateSpots(doc)) {
     // A container rejected earlier in this loop (search row, then the same row as a slot).
     if (rejected.has(spot.container)) continue;
+    // A hidden container (GitHub hides the whole header on some pages) is skipped, not rejected:
+    // it may show again.
+    if (!isVisible(spot.container)) continue;
     // Already there and showing: leave the DOM alone.
-    if (isAt(el, spot) && shows(el, spot.container)) return setPlacement(el, 'header');
-    if (spot.before) spot.container.insertBefore(el, spot.before);
-    else spot.container.prepend(el);
+    if (isAt(el, spot) && !wasFloating && shows(el, spot.container)) {
+      return setPlacement(el, 'header');
+    }
+    if (!isAt(el, spot)) {
+      if (spot.before) spot.container.insertBefore(el, spot.before);
+      else spot.container.prepend(el);
+    }
+    // The header style before the check: a floating badge is fixed in the corner, outside any
+    // container, and would always look clipped.
+    setPlacement(el, 'header');
     if (shows(el, spot.container)) return setPlacement(el, 'header');
     rejected.add(spot.container);
   }
-  if (options.allowFloating || el.dataset['placement'] === 'floating') {
+  if (options.allowFloating || wasFloating) {
     if (el.parentElement !== doc.body) doc.body.append(el);
     return setPlacement(el, 'floating');
   }
@@ -228,7 +294,7 @@ function describe(el: Element): string {
     .slice(0, 4)
     .map((c) => `.${clean(c)}`)
     .join('');
-  return `${el.tagName.toLowerCase()}${id}${classes}`;
+  return `${clean(el.tagName.toLowerCase())}${id}${classes}`;
 }
 
 /**
