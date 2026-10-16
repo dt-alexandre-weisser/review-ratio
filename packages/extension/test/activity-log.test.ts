@@ -134,16 +134,16 @@ describe('ActivityLog', () => {
 
   it('keeps the newest batches within the entry cap, and always the newest one', async () => {
     const { area, log, now } = setup();
-    for (let i = 1; i <= 60; i++) area.data[`activity:${now() - i}:100:x${i}`] = [];
+    for (let i = 1; i <= 40; i++) area.data[`activity:${now() - i}:100:x${i}`] = [];
     log.event('newest');
     await log.flush();
     const kept = logKeys(area.data);
-    // The newest batch (1 entry) and the 49 newest of 100 entries: 4,901 entries.
-    expect(kept).toHaveLength(50);
+    // The newest batch (1 entry) and the 29 newest of 100 entries: 2,901 entries.
+    expect(kept).toHaveLength(30);
     expect(kept).toContain(`activity:${now()}:1:id1`);
-    expect(kept).toContain(`activity:${now() - 49}:100:x49`);
-    expect(kept).not.toContain(`activity:${now() - 50}:100:x50`);
-    expect(MAX_ENTRIES).toBe(5_000);
+    expect(kept).toContain(`activity:${now() - 29}:100:x29`);
+    expect(kept).not.toContain(`activity:${now() - 30}:100:x30`);
+    expect(MAX_ENTRIES).toBe(3_000);
 
     area.data[`activity:${now() + 1}:${MAX_ENTRIES + 1}:huge`] = [];
     await log.flush();
@@ -450,14 +450,10 @@ describe('request bodies', () => {
       `${QUERY}\n\nvariables:\n{\n  "owner": "DiliTrust",\n  "name": "app",\n  "number": 3,\n  "me": "dev"\n}`,
     );
 
-    // Not written again by this writer; written again by a new one (a restarted worker).
-    await area.remove([`activityQuery:${id}`]);
+    // Written again with the next batch after the log was cleared ("Forget").
+    await clearActivity(area);
     await fetchLogged('https://api.github.com/graphql', { method: 'POST', body: graphql({}) });
     await log.flush();
-    expect(await readQuery(area, id)).toBeNull();
-    const restarted = new ActivityLog(area, { now });
-    restarted.call(sent({ method: 'POST' }), graphql({}));
-    await restarted.flush();
     expect(await readQuery(area, id)).toBe(QUERY);
   });
 
@@ -475,7 +471,7 @@ describe('request bodies', () => {
     });
     expect(formatBody(score!.body!, null)).toBe('{\n  "contractVersion": 1,\n  "up": []\n}');
     expect(big?.body).toMatchObject({ kind: 'text', truncated: true });
-    expect(formatBody(big!.body!, null)).toMatch(/\n… cut at 64 kB$/);
+    expect(formatBody(big!.body!, null)).toMatch(/\n… cut at 65,536 characters$/);
     expect(broken?.body).toEqual({ kind: 'text', text: '{"query": broken', truncated: false });
     expect(formatBody(broken!.body!, null)).toBe('{"query": broken');
   });

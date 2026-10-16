@@ -21,14 +21,15 @@ export const FLUSH_DELAY_MS = 2_000;
 /** A batch this large is written at once. */
 export const MAX_BATCH_ENTRIES = 100;
 /**
- * Oldest batches beyond this many entries are dropped. A heavy 30 minutes is about 2,000 calls.
- * With texts clipped at 500 characters, 5,000 entries stay under 8 MB of the 10 MB quota.
+ * Oldest batches beyond this many entries are dropped. A heavy 30 minutes is about 2,000 calls of
+ * about 400 bytes each. Even with every text at its cap (500 characters each, 1,000 of
+ * variables), 3,000 entries stay under the 10 MB session quota.
  */
-export const MAX_ENTRIES = 5_000;
+export const MAX_ENTRIES = 3_000;
 const MAX_TEXT = 500;
 /** A request body other than GraphQL (the score payload) is kept up to this many characters. */
 export const MAX_BODY_TEXT = 64 * 1024;
-const MAX_VARIABLES = 2_000;
+const MAX_VARIABLES = 1_000;
 const MAX_QUERY = 20_000;
 const KEY_PREFIX = 'activity:';
 const QUERY_PREFIX = 'activityQuery:';
@@ -127,10 +128,11 @@ function parseKey(key: string): BatchKey | null {
 /** Buffers entries and writes them to session storage in batches. */
 export class ActivityLog {
   private pending: ActivityEntry[] = [];
-  /** Query texts to write with the next batch, by id. */
+  /**
+   * Query texts of the buffered calls, by id, written with every batch: rewriting three short
+   * texts is cheap, and a log cleared meanwhile ("Forget") gets them back.
+   */
   private pendingQueries = new Map<string, string>();
-  /** Query ids this context already wrote. */
-  private readonly writtenQueries = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly now: () => number;
   private readonly randomId: () => string;
@@ -170,9 +172,7 @@ export class ActivityLog {
       return { kind: 'text', text: truncated ? sent.slice(0, MAX_BODY_TEXT) : sent, truncated };
     }
     const queryId = queryIdOf(graphql.query);
-    if (!this.writtenQueries.has(queryId)) {
-      this.pendingQueries.set(queryId, clip(graphql.query, MAX_QUERY));
-    }
+    this.pendingQueries.set(queryId, clip(graphql.query, MAX_QUERY));
     return {
       kind: 'graphql',
       queryId,
@@ -205,7 +205,6 @@ export class ActivityLog {
       for (const [id, query] of queries) items[`${QUERY_PREFIX}${id}`] = query;
       try {
         await this.area.set(items);
-        for (const id of queries.keys()) this.writtenQueries.add(id);
       } catch (error) {
         this.onError(error);
       }
@@ -323,7 +322,9 @@ function pretty(text: string): string {
 /** A kept body as it reads on the options page. */
 export function formatBody(body: CallBody, query: string | null): string {
   if (body.kind === 'text') {
-    const note = body.truncated ? `\n… cut at ${MAX_BODY_TEXT / 1024} kB` : '';
+    const note = body.truncated
+      ? `\n… cut at ${MAX_BODY_TEXT.toLocaleString('en-US')} characters`
+      : '';
     return `${pretty(body.text)}${note}`;
   }
   const text = query ?? '(query text no longer in the log)';

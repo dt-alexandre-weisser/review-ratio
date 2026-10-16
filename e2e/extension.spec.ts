@@ -340,7 +340,7 @@ test('shows no badge on signed-out pages', async ({ context, extensionId }) => {
   await expect(github.locator('#review-ratio-badge')).toHaveCount(0);
 });
 
-test("waits for GitHub's React to take over its header before placing the badge", async ({
+test("holds the badge's place while GitHub's React takes over its header", async ({
   context,
   extensionId,
 }) => {
@@ -348,15 +348,62 @@ test("waits for GitHub's React to take over its header before placing the badge"
   const options = await context.newPage();
   await configure(options, extensionId, { token: 'github_pat_e2e' });
   const github = await context.newPage();
+  await github.setViewportSize({ width: 1400, height: 600 });
   await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
   const badge = github.locator('#review-ratio-badge');
-  await github.waitForTimeout(800);
+  const standIn = () =>
+    github.evaluate(() => {
+      const group = document.querySelector('[class*="Search-module__searchButtonGroup"]')!;
+      const before = getComputedStyle(group, '::before');
+      return { content: before.content, width: before.width };
+    });
+
+  // Before React's commit: no node in the header, only the CSS stand-in with the badge's text.
+  await expect(github.locator('html')).toHaveAttribute('data-review-ratio-placeholder', '');
   await expect(badge).toHaveCount(0);
+  expect((await standIn()).content).toBe('"↑ 400 RP · ↓ 400 RP | Ratio 1.00"');
+
+  // After it: the badge, in the stand-in's place, and the stand-in gone.
   await expect(badge).toHaveAttribute('data-placement', 'header', { timeout: 3_000 });
+  await expect(github.locator('html')).not.toHaveAttribute('data-review-ratio-placeholder');
+  expect((await standIn()).content).toBe('none');
   const marked = await github.evaluate(
     () => performance.getEntriesByName('react-root:commit:global-nav-bar')[0]?.startTime ?? 0,
   );
   expect(marked).toBeGreaterThan(1_000);
+});
+
+test('shows the badge or its stand-in on every frame when a navigation brings a new header', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context, { hydratesAfterMs: 0 });
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+  const github = await context.newPage();
+  await github.setViewportSize({ width: 1400, height: 600 });
+  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await expect(github.locator('#review-ratio-badge')).toHaveAttribute('data-placement', 'header');
+
+  const frames = await github.evaluate(async () => {
+    const shown = () => {
+      if (document.getElementById('review-ratio-badge')) return 'badge';
+      const group = document.querySelector('[class*="Search-module__searchButtonGroup"]');
+      return group && getComputedStyle(group, '::before').content !== 'none' ? 'stand-in' : 'none';
+    };
+    const seen: string[] = [];
+    for (const delay of [0, 50, 150]) {
+      (window as unknown as { swapHeader: (ms: number) => void }).swapHeader(delay);
+      for (let i = 0; i < 20; i++) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        seen.push(shown());
+      }
+    }
+    return seen;
+  });
+  expect(frames).not.toContain('none');
+  expect(frames).toContain('stand-in');
+  expect(frames.at(-1)).toBe('badge');
 });
 
 test('keeps the badge on screen when GitHub replaces its header, without a single frame missing', async ({

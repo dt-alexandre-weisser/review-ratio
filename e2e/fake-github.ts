@@ -146,8 +146,23 @@ function header(options: FakeGitHubOptions): string {
       <script>setTimeout(() => { document.getElementById('late').style.display = ''; }, ${options.headerShowsAfterMs});</script>`;
   }
   if (options.hydratesAfterMs !== undefined) {
+    // window.swapHeader(ms) does what a Turbo visit does: a fresh server-rendered header replaces
+    // the old one, and React commits it after ms.
     return `<react-partial partial-name="global-nav-bar" data-ssr="true">${html}</react-partial>
-      <script>setTimeout(() => performance.mark('react-root:commit:global-nav-bar'), ${options.hydratesAfterMs});</script>`;
+      <script>
+        const commit = () => performance.mark('react-root:commit:global-nav-bar');
+        setTimeout(commit, ${options.hydratesAfterMs});
+        window.swapHeader = (ms) => {
+          const old = document.querySelector('react-partial');
+          const fresh = document.createElement('react-partial');
+          fresh.setAttribute('partial-name', 'global-nav-bar');
+          fresh.setAttribute('data-ssr', 'true');
+          fresh.innerHTML = ${JSON.stringify(html)};
+          old.replaceWith(fresh);
+          document.dispatchEvent(new Event('turbo:render'));
+          setTimeout(commit, ms);
+        };
+      </script>`;
   }
   return html;
 }

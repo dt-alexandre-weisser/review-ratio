@@ -216,10 +216,19 @@ question below.
   cached badge at once. GitHub renders its header on the server, then React hydrates it; a node
   added before that makes React throw the header away and render it again. GitHub marks each
   React root's commit (`react-root:commit:<partial>`) and performance marks are shared with the
-  extension's world, so the badge goes in on the first frame after that mark (3 seconds at most,
-  should GitHub rename it). A header swapped in by a navigation waits for its own commit. When
-  GitHub re-renders or replaces the header, a mutation observer puts the badge back in the same
-  microtask, before anything paints, at most 20 times a second.
+  extension's world, so the badge goes in on the first frame after that mark. A header brought by
+  a navigation (Turbo swaps the whole body) waits for a commit after that navigation. Should
+  GitHub rename the mark, the badge goes in anyway 3 seconds after the page's `load`, never
+  during a slow load.
+- Until then a stand-in holds the badge's place: a `::before` pseudo-element on GitHub's search
+  group, drawn by CSS alone from custom properties and attributes on `<html>`, so it adds no node
+  to React's tree. It has the badge's text, box and colours (a hard-stop gradient clipped to the
+  monospace text colours ↑, ↓ and the ratio apart) and the gap the badge last left before the
+  search. The badge replaces it in the same task: no frame shows neither or both. Measured on
+  GitHub's real header CSS, the search box keeps its position and corners.
+- When GitHub re-renders or replaces the header, a mutation observer puts the badge back in the
+  same microtask, before anything paints. Past 20 restores in a second, it waits for the next
+  frame instead.
 - When no place works 3 seconds after the page loads or GitHub navigates, the badge floats in the
   bottom-right corner, and moves into the header as soon as a place appears.
 - Signed-out, sign-in and sudo pages show no badge (no `meta[name="user-login"]` and no

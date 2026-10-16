@@ -69,3 +69,82 @@
   background: var(--bgColor-default, var(--color-canvas-default, #ffffff));
   box-shadow: var(--shadow-floating-small, 0 1px 3px rgba(31, 35, 40, 0.12));
 }
+
+/*
+ * Stand-in while GitHub's React takes over its server-rendered header. The badge cannot go in
+ * before that (React would throw the header away), so the place is held by a pseudo-element on
+ * GitHub's search group: drawn by CSS alone, it adds no node to React's tree. The content script
+ * sets the text and the colour stops on <html>; it looks like the badge, and the badge replaces it
+ * in the same frame.
+ */
+html[data-review-ratio-placeholder] [class*='Search-module__searchButtonGroup']::before {
+  content: var(--review-ratio-text);
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  margin: 0 var(--review-ratio-gap, 16px) 0 8px;
+  padding: 3px 8px;
+  border: 1px solid var(--review-ratio-border);
+  border-radius: 6px;
+  font-family: var(--fontStack-monospace, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12px;
+  font-weight: normal;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+  pointer-events: none;
+  color: var(--review-ratio-tone);
+}
+
+/* ↑, separators, ↓ and the ratio coloured apart: a hard-stop gradient clipped to the text, with
+   stops between characters of the monospace text. */
+html[data-review-ratio-placeholder][data-review-ratio-colors]
+  [class*='Search-module__searchButtonGroup']::before {
+  color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--fgColor-success, var(--color-success-fg, #1a7f37)) 0 calc(8px + var(--review-ratio-a)),
+    var(--fgColor-muted, var(--color-fg-muted, #59636e)) 0 calc(8px + var(--review-ratio-b)),
+    var(--fgColor-danger, var(--color-danger-fg, #d1242f)) 0 calc(8px + var(--review-ratio-c)),
+    var(--fgColor-muted, var(--color-fg-muted, #59636e)) 0 calc(8px + var(--review-ratio-d)),
+    var(--review-ratio-tone) 0
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+html[data-review-ratio-placeholder][data-review-ratio-stale='true']
+  [class*='Search-module__searchButtonGroup']::before {
+  opacity: 0.6;
+}
+
+html[data-review-ratio-placeholder] {
+  --review-ratio-tone: var(--fgColor-muted, var(--color-fg-muted, #59636e));
+  --review-ratio-border: var(--borderColor-default, var(--color-border-default, #d0d7de));
+}
+
+html[data-review-ratio-placeholder][data-review-ratio-tone='good'] {
+  --review-ratio-tone: var(--fgColor-success, var(--color-success-fg, #1a7f37));
+  --review-ratio-border: var(
+    --borderColor-success-emphasis,
+    var(--color-success-emphasis, #1f883d)
+  );
+}
+
+html[data-review-ratio-placeholder][data-review-ratio-tone='low'] {
+  --review-ratio-tone: var(--fgColor-attention, var(--color-attention-fg, #9a6700));
+  --review-ratio-border: var(
+    --borderColor-attention-emphasis,
+    var(--color-attention-emphasis, #bf8700)
+  );
+}
+
+@media (max-width: 1280px) {
+  html[data-review-ratio-placeholder] [class*='Search-module__searchButtonGroup']::before {
+    content: var(--review-ratio-short);
+    color: var(--review-ratio-tone);
+    background-image: none;
+  }
+}

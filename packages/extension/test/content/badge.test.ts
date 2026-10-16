@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BADGE_ID,
@@ -349,7 +349,7 @@ describe('headerReady', () => {
   const ssr = (inner: string) =>
     `<react-partial partial-name="global-nav-bar" data-ssr="true">${inner}</react-partial>`;
 
-  it("waits for GitHub's React to commit a server-rendered header, and no longer than a bound", () => {
+  it("waits for GitHub's React to commit a server-rendered header", () => {
     performance.clearMarks();
     // No React root, or one rendered on the client: nothing to wait for.
     document.body.innerHTML = GLOBAL_NAV;
@@ -357,24 +357,43 @@ describe('headerReady', () => {
     document.body.innerHTML = `<react-partial partial-name="global-nav-bar">${GLOBAL_NAV}</react-partial>`;
     expect(headerReady(document)).toBe(true);
 
-    // The page's first root: a commit from before the script ran counts.
+    // The page load's root: a commit from before the script ran counts.
     document.body.innerHTML = ssr(GLOBAL_NAV);
-    expect(headerReady(document)).toBe(false);
+    const loaded = performance.now();
+    expect(headerReady(document, null, loaded)).toBe(false);
     performance.mark('react-root:commit:global-nav-bar');
-    expect(headerReady(document)).toBe(true);
+    expect(headerReady(document, null, loaded + 1)).toBe(true);
 
-    // A root swapped in by a navigation needs a commit of its own.
+    // A root brought by a navigation needs a commit after that navigation.
+    const navigated = performance.now() + 1;
     document.body.innerHTML = ssr(GLOBAL_NAV);
-    const seen = performance.now();
-    expect(headerReady(document, seen)).toBe(false);
-    performance.mark('react-root:commit:global-nav-bar');
-    expect(headerReady(document, seen + 1)).toBe(true);
+    expect(headerReady(document, navigated, navigated + 1)).toBe(false);
+    performance.mark('react-root:commit:global-nav-bar', { startTime: navigated + 2 });
+    expect(headerReady(document, navigated, navigated + 3)).toBe(true);
 
-    // GitHub renamed its marks: place the badge anyway after a while.
+    // A root swapped in without a navigation event: a commit after its first sight.
     document.body.innerHTML = ssr(GLOBAL_NAV);
-    const start = performance.now();
-    expect(headerReady(document, start)).toBe(false);
-    expect(headerReady(document, start + HYDRATION_WAIT_MS)).toBe(true);
+    const seen = navigated + 10;
+    expect(headerReady(document, navigated, seen)).toBe(false);
+    performance.mark('react-root:commit:global-nav-bar', { startTime: seen + 1 });
+    expect(headerReady(document, navigated, seen + 2)).toBe(true);
+  });
+
+  it('places the badge anyway a while after the page has loaded, not before', () => {
+    performance.clearMarks();
+    const readyState = vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading');
+    document.body.innerHTML = ssr(GLOBAL_NAV);
+    const start = performance.now() + 100;
+    // A slow load is not a renamed mark: no fallback while loading.
+    expect(headerReady(document, null, start)).toBe(false);
+    expect(headerReady(document, null, start + 10 * HYDRATION_WAIT_MS)).toBe(false);
+    readyState.mockReturnValue('complete');
+    const loaded = start + 10 * HYDRATION_WAIT_MS + 1;
+    expect(headerReady(document, null, loaded)).toBe(false);
+    expect(headerReady(document, null, loaded + HYDRATION_WAIT_MS - 1)).toBe(false);
+    // A whole millisecond past: `(a + 3000) - a` may round below 3000.
+    expect(headerReady(document, null, loaded + HYDRATION_WAIT_MS + 1)).toBe(true);
+    readyState.mockRestore();
   });
 
   it('reads the signed-in signal while the body does not exist yet', () => {

@@ -190,35 +190,56 @@ export function isSignedIn(doc: Document): boolean {
 }
 
 /**
- * How long to wait for GitHub's React to take over a server-rendered header before placing the
- * badge anyway, in case GitHub renames its performance marks.
+ * How long to wait, once the page has loaded, for GitHub's React to take over a server-rendered
+ * header before placing the badge anyway, in case GitHub renames its performance marks.
  */
 export const HYDRATION_WAIT_MS = 3_000;
 
-/** For each server-rendered React root seen: marks from before this time are an older root's. */
-const hydrationSeen = new WeakMap<Element, { since: number; firstChecked: number }>();
-let firstRoot = true;
+interface RootSeen {
+  /** Commit marks from before this time belong to an older root. */
+  since: number;
+  /** Start of the fallback clock: the page's load, or when a later root was first seen. */
+  clockFrom: number | null;
+}
+
+/** Server-rendered React roots seen, and when the last one was first seen. */
+const rootsSeen = new WeakMap<Element, RootSeen>();
+let lastRootSeenAt: number | null = null;
 
 /**
  * Whether the header can take the badge now. GitHub renders its header on the server, then React
  * hydrates it; a node added before that makes React throw the header away and render it again.
  * GitHub marks each React root's commit (`react-root:commit:<name>`), and performance marks are
  * shared with the extension's world.
+ *
+ * `navigatedAt` is when GitHub last navigated without a page load (`performance.now()`), if ever.
  */
-export function headerReady(doc: Document, now: number = performance.now()): boolean {
+export function headerReady(
+  doc: Document,
+  navigatedAt: number | null = null,
+  now: number = performance.now(),
+): boolean {
   const header = findHeader(doc);
   const root = header?.closest('react-partial, react-app');
   if (root?.getAttribute('data-ssr') !== 'true') return true;
   const name = root.getAttribute('partial-name') ?? root.getAttribute('app-name') ?? '';
-  let seen = hydrationSeen.get(root);
+  let seen = rootsSeen.get(root);
   if (!seen) {
-    // The page's first root may have committed before this script ran; a later one (after a
-    // navigation) needs a commit of its own.
-    seen = { since: firstRoot ? 0 : now, firstChecked: now };
-    firstRoot = false;
-    hydrationSeen.set(root, seen);
+    // The page load's root may have committed before this script ran: any commit counts. A root
+    // brought by a navigation needs a commit after that navigation; without a navigation since
+    // the previous root, after its first sight.
+    const navigated =
+      navigatedAt !== null && (lastRootSeenAt === null || navigatedAt > lastRootSeenAt);
+    seen = {
+      since: navigated ? navigatedAt : lastRootSeenAt === null ? 0 : now,
+      clockFrom: null,
+    };
+    rootsSeen.set(root, seen);
+    lastRootSeenAt = now;
   }
-  if (now - seen.firstChecked >= HYDRATION_WAIT_MS) return true;
+  // The fallback clock starts once the page has loaded: a slow load is not a renamed mark.
+  if (seen.clockFrom === null && doc.readyState === 'complete') seen.clockFrom = now;
+  if (seen.clockFrom !== null && now - seen.clockFrom >= HYDRATION_WAIT_MS) return true;
   const since = seen.since;
   return performance
     .getEntriesByName(`react-root:commit:${name}`, 'mark')

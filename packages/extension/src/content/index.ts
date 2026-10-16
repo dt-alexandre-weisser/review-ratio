@@ -20,6 +20,7 @@ import {
   isSignedIn,
   mount,
 } from './badge.ts';
+import { hidePlaceholder, rememberGap, showPlaceholder } from './placeholder.ts';
 
 const REMOUNT_INTERVAL_MS = 5_000;
 /** How long GitHub gets to render its header, after a load or a navigation, before the badge floats. */
@@ -45,6 +46,8 @@ let reported: Placement | null = null;
 let requesting = false;
 let frame = 0;
 let restores = { second: 0, count: 0 };
+/** When GitHub last navigated without a page load (`performance.now()`), if ever. */
+let navigatedAt: number | null = null;
 
 function alive(): boolean {
   try {
@@ -69,16 +72,22 @@ function ensureMounted(): void {
   // Signed-out, sign-in and sudo pages: the ratio is the signed-in developer's own, not shown.
   if (!isSignedIn(document)) {
     document.getElementById(BADGE_ID)?.remove();
+    hidePlaceholder(document);
     return;
   }
-  // Until GitHub's React takes over its server-rendered header, check again every frame.
-  if (!headerReady(document)) {
+  // Until GitHub's React takes over its server-rendered header, a CSS stand-in holds the place,
+  // and the check runs again every frame.
+  if (!headerReady(document, navigatedAt)) {
+    showPlaceholder(document, lastView);
     scheduleMount();
     return;
   }
   const mounted = mount(document, lastView, {
     allowFloating: Date.now() - graceFrom >= FLOATING_AFTER_MS,
   });
+  // In the same task as the insertion: no frame shows both, or neither.
+  hidePlaceholder(document);
+  if (mounted?.placement === 'header') rememberGap(document, mounted.el);
   if (mounted && mounted.placement !== reported) {
     reported = mounted.placement;
     void ask({
@@ -106,9 +115,14 @@ const observer = new MutationObserver(() => {
   if (!lastView || document.getElementById(BADGE_ID)) return;
   const second = Math.floor(Date.now() / 1000);
   if (restores.second !== second) restores = { second, count: 0 };
-  restores.count += 1;
-  // Beyond the limit, the periodic check takes over.
-  if (restores.count <= MAX_RESTORES_PER_SECOND) ensureMounted();
+  // Beyond the limit, once a frame at most.
+  if (restores.count >= MAX_RESTORES_PER_SECOND) {
+    scheduleMount();
+    return;
+  }
+  ensureMounted();
+  // Only an actual restore counts: batches while parsing or waiting for React do not.
+  if (document.getElementById(BADGE_ID)) restores.count += 1;
 });
 
 async function ask(request: Request): Promise<Response | null> {
@@ -151,6 +165,7 @@ let graceCheck = window.setTimeout(ensureMounted, FLOATING_AFTER_MS);
 
 /** A navigation may bring a header that renders late: give it a fresh grace period. */
 function onNavigate(): void {
+  navigatedAt = performance.now();
   forgetRejections();
   graceFrom = Date.now();
   window.clearTimeout(graceCheck);
@@ -171,6 +186,7 @@ function onResize(): void {
 
 function teardown(): void {
   observer.disconnect();
+  hidePlaceholder(document);
   window.cancelAnimationFrame(frame);
   window.clearInterval(timer);
   window.clearTimeout(graceCheck);

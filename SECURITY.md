@@ -2,13 +2,17 @@
 
 ## What the extension can access
 
-| Permission                                           | Why                                                                          |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `storage`                                            | Settings, the cached badge, PR keys, Viewed snapshots, compare cache, log    |
-| `scripting`                                          | Put the badge back in GitHub tabs that were open during an install or update |
-| `https://api.github.com/*`                           | Read your reviews and PRs with your token                                    |
-| `https://github.com/*`                               | Show the badge in the header (content script)                                |
-| `http://localhost:8787/*`, `http://127.0.0.1:8787/*` | The prototype server                                                         |
+| Permission                 | Why                                                                          |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| `storage`                  | Settings, the cached badge, PR keys, Viewed snapshots, compare cache, log    |
+| `scripting`                | Put the badge back in GitHub tabs that were open during an install or update |
+| `https://api.github.com/*` | Read your reviews and PRs with your token                                    |
+| `https://github.com/*`     | Show the badge in the header (content script)                                |
+
+The badge, and its stand-in while GitHub's header loads (custom properties on `<html>`), are part
+of the github.com page: GitHub's own scripts could read the ratio shown there. Nothing else the
+extension holds is reachable from the page.
+| `http://localhost:8787/*`, `http://127.0.0.1:8787/*` | The prototype server |
 
 ## The token
 
