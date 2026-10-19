@@ -76,7 +76,8 @@ and that the sign-in sends GitHub the client ID and no secret.
 The formula, its weights and the class globs are bundled in the extension and public: the options
 page links to **How Review Points are counted**, which renders them from the code.
 
-Every install has the same extension id (the manifest pins a public key), so the `Origin` header of
+Every install from the release zip or from source has the same extension id (the manifest pins a
+public key), and every install from the Chrome Web Store has the Store's, so the `Origin` header of
 a call to GitHub says nothing about the machine or the user.
 
 The bundled class globs are matched by the extension's own glob matcher, without regular
