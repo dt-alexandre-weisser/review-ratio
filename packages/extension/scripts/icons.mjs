@@ -15,7 +15,7 @@ const CRC_TABLE = new Uint32Array(256).map((_, n) => {
 });
 
 /** @param {Uint8Array} bytes */
-function crc32(bytes) {
+export function crc32(bytes) {
   let crc = 0xffffffff;
   for (const b of bytes) crc = (CRC_TABLE[(crc ^ b) & 0xff] ?? 0) ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
@@ -65,11 +65,13 @@ export function png(size, shade) {
 const GREEN = [31, 136, 61];
 
 /**
- * Supersampled shader: a green disc with a white up arrow (left) and down arrow (right).
+ * Supersampled shader: a green disc with a white up arrow (left) and down arrow (right), `size`
+ * pixels wide, after a transparent `margin` (the Chrome Web Store wants 96 px art in a 128 px icon).
  * @param {number} size
+ * @param {number} [margin]
  * @returns {(x: number, y: number) => Rgba}
  */
-function iconShader(size) {
+export function iconShader(size, margin = 0) {
   const samples = 4;
   const [gr0, gg0, gb0] = GREEN;
   return (x, y) => {
@@ -77,8 +79,8 @@ function iconShader(size) {
     let glyph = 0;
     for (let sy = 0; sy < samples; sy += 1) {
       for (let sx = 0; sx < samples; sx += 1) {
-        const px = (x + (sx + 0.5) / samples) / size;
-        const py = (y + (sy + 0.5) / samples) / size;
+        const px = (x - margin + (sx + 0.5) / samples) / size;
+        const py = (y - margin + (sy + 0.5) / samples) / size;
         const dx = px - 0.5;
         const dy = py - 0.5;
         if (dx * dx + dy * dy <= 0.25) disc += 1;

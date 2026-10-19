@@ -2,7 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["chrome", "node"]
+    "types": ["chrome", "node"],
+    // The packaging tests import scripts/package.mjs: check it with its JSDoc types.
+    "allowJs": true,
+    "checkJs": true
   },
   "include": ["vitest.config.ts", "src/**/*", "test/**/*", "scripts/**/*"]
 }

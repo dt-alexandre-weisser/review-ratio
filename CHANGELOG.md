@@ -35,3 +35,10 @@ First prototype.
   the organisation. The sign-in calls are logged without what they sent or received.
 - CI: format, lint, typecheck (scripts included), unit and formula tests with coverage
   thresholds, build, end-to-end tests in Chromium.
+- Install without building: every push to `main` that changes the extension publishes
+  `review-ratio.zip` as the Latest GitHub Release, at a stable download URL, versioned
+  `<version>.<run number>`. The README installs from it.
+- Chrome Web Store, prepared: a `v*` tag uploads the build and submits it for review with the
+  Store API v2, once the secrets exist (docs/chrome-web-store.md). The Store zip has no manifest
+  `key`. Listing text, permission justifications, privacy answers, PRIVACY.md and the Store images
+  (`pnpm store:images`, generated against the fake GitHub).
