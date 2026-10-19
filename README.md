@@ -11,6 +11,96 @@ ask others to review. It works like a torrent ratio, for code review.
 team view, no leaderboard, and no server: the extension computes the badge in your browser. The
 full product design is in [DESIGN.md](DESIGN.md).
 
+## How to install
+
+About 5 minutes. You need:
+
+- Chrome, Edge, Brave or Arc, version 140 or later
+- [Node.js](https://nodejs.org) 22.13 or later
+- git
+
+### 1. Build the extension
+
+```sh
+git clone https://github.com/dt-alexandre-weisser/review-ratio.git
+cd review-ratio
+corepack enable     # provides pnpm
+pnpm install
+pnpm build
+```
+
+The extension is now in `packages/extension/dist`.
+
+### 2. Load it in the browser
+
+1. Open `chrome://extensions` (Edge: `edge://extensions`).
+2. Turn on **Developer mode**, top right.
+3. Click **Load unpacked** and pick the `packages/extension/dist` folder.
+
+The review-ratio options page opens by itself.
+
+### 3. Connect to GitHub
+
+On the options page, keep **Sign in with GitHub** selected:
+
+1. Click **Sign in with GitHub**. A code appears.
+2. Click **Open GitHub**, type the code, then click **Authorize review-ratio**.
+3. Back on the options page: **Signed in as _you_**.
+4. Check that **GitHub organisation** is `DiliTrust`, click **Save**, then **Test connection**.
+
+If Test connection says the app is not installed on the organisation, an owner of `DiliTrust`
+has to install it once: <https://github.com/apps/review-ratio/installations/new>. Until then,
+use a token instead (below).
+
+### 4. See your ratio
+
+Open any github.com page. The badge appears in the header, left of the search box, within a few
+seconds.
+
+### Update
+
+```sh
+git pull
+pnpm install
+pnpm build
+```
+
+Then click the reload arrow on the review-ratio card in `chrome://extensions`.
+
+### Uninstall
+
+Click **Remove** on the review-ratio card in `chrome://extensions`. To revoke the sign-in at GitHub
+too: **Settings → Applications → Authorized GitHub Apps → review-ratio → Revoke**.
+
+<details>
+<summary>Use a token instead of signing in</summary>
+
+On the options page, pick **Paste a token**. Create a fine-grained personal access token at
+<https://github.com/settings/personal-access-tokens/new>:
+
+| Field             | Value                                               |
+| ----------------- | --------------------------------------------------- |
+| Resource owner    | `DiliTrust`                                         |
+| Repository access | All repositories                                    |
+| Permissions       | Pull requests: Read, Contents: Read, Metadata: Read |
+
+Paste it, click **Save**, then **Test connection**. An owner of `DiliTrust` may have to approve the
+token first.
+
+</details>
+
+### What the extension can access
+
+Both ways read the same data with the same read-only permissions (Pull requests, Contents,
+Metadata). It cannot write anything to GitHub. The token stays in `chrome.storage.local`, out of
+reach of web pages, and is only sent to GitHub. With the app, the token expires after 8 hours and
+renews itself; you sign in again only after about 6 months without use. **Sign out** forgets the
+tokens in this browser. Details in [SECURITY.md](SECURITY.md) and
+[docs/github-app-setup.md](docs/github-app-setup.md).
+
+Every install has the same extension id, `bhmdipijifghpkibegnfchgcafodlgnb`, pinned by the public
+key in the manifest.
+
 ## How it works
 
 ```
@@ -30,53 +120,6 @@ github.com page ──► extension (MV3) ──► GitHub API (your own read-on
 
 The options page links to **How Review Points are counted**, a page of the extension that shows the
 whole formula: every weight, threshold and glob, rendered from the constants the badge runs on.
-
-## Quick start (prototype)
-
-Prerequisites: Node 22.13 or later, pnpm 10 (`corepack enable`), and a Chromium browser version 140
-or later (Chrome, Edge, Brave or Arc).
-
-```sh
-pnpm install
-pnpm build          # builds the extension into packages/extension/dist
-```
-
-Load the extension:
-
-1. Open `chrome://extensions` and turn on **Developer mode**.
-2. Click **Load unpacked** and pick `packages/extension/dist`.
-3. The options page opens. Connect to GitHub (below), click **Save**, then **Test connection**.
-   The test also checks that the extension can see the organisation's private repositories.
-4. Open any github.com page. The badge appears in the header within a few seconds.
-
-Every install has the same extension id, `bhmdipijifghpkibegnfchgcafodlgnb`, pinned by the public
-key in the manifest.
-
-### Connect to GitHub
-
-The options page offers two ways. Both read the same data with the same read-only permissions
-(Pull requests, Contents, Metadata).
-
-**Sign in with GitHub (recommended).** Click **Sign in with GitHub**: the page shows a code, and
-**Open GitHub** opens `github.com/login/device`, where you type it and authorise the review-ratio
-GitHub App. The page switches to "Signed in as …" by itself. The app's token expires after 8
-hours and renews itself; you sign in again only after about 6 months without use. An owner of the
-organisation must have installed the app once:
-<https://github.com/apps/review-ratio/installations/new> (see
-[docs/github-app-setup.md](docs/github-app-setup.md)). **Sign out** forgets the tokens in this
-browser; to revoke them at GitHub too, use Settings → Applications → Authorized GitHub Apps.
-
-**Paste a token.** Create a fine-grained personal access token at
-<https://github.com/settings/personal-access-tokens/new>:
-
-| Field             | Value                                               |
-| ----------------- | --------------------------------------------------- |
-| Resource owner    | `DiliTrust`                                         |
-| Repository access | All repositories                                    |
-| Permissions       | Pull requests: Read, Contents: Read, Metadata: Read |
-
-Either way, the tokens stay in `chrome.storage.local`, out of reach of content scripts, and are
-only sent to GitHub.
 
 ## Badge states
 
