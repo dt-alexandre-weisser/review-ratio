@@ -10,7 +10,7 @@ export interface Settings {
   authMode: AuthMode;
   /** Fine-grained PAT, read-only. Empty until the developer pastes one, and in app mode. */
   token: string;
-  /** The GitHub organisation whose repositories count. */
+  /** The GitHub organisation whose repositories count. Empty until the developer picks one. */
   org: string;
   /** Repositories to ignore, as `owner/name` or `name` (within `org`). Case-insensitive. */
   excludedRepos: string[];
@@ -19,7 +19,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   authMode: 'pat',
   token: '',
-  org: 'DiliTrust',
+  org: '',
   excludedRepos: [],
 });
 

@@ -29,7 +29,7 @@ A badge in the github.com header that shows a developer how much they review com
 
 ## Scope
 
-- Every repo of the `DiliTrust` org the developer can access, found with the search API (`reviewed-by:@me`, `author:@me`, `updated:` within 7 days).
+- Every repo of the organisation the developer picks in the options, among those they can access, found with the search API (`reviewed-by:@me`, `author:@me`, `updated:` within 7 days).
 - An optional per-user repo exclude list in the extension options.
 
 ### Bot PRs
@@ -177,18 +177,18 @@ One pnpm monorepo, TypeScript throughout. One package, `packages/extension`: the
 | Mode | Mechanism |
 | --- | --- |
 | Sign in with GitHub (recommended) | The review-ratio GitHub App with the device flow. One click and a code to type, an expiring user token renewed by itself. Needs an org owner to install the app once. |
-| Paste a token (fallback) | Fine-grained PAT, read-only (Pull requests, Contents, Metadata), resource owner `DiliTrust`, pasted in the options page |
+| Paste a token (fallback) | Fine-grained PAT, read-only (Pull requests, Contents, Metadata), resource owner the developer's organisation, pasted in the options page |
 
 The permissions are the same in both modes, and both store their tokens in `chrome.storage.local`.
 The app's settings and installation are in `docs/github-app-setup.md`.
 
 ## Repository
 
-- `dt-alexandre-weisser/review-ratio`, private, during the prototype.
-- Transferred to the `DiliTrust` org at rollout. GitHub keeps the history and redirects the old URL.
+- `dt-alexandre-weisser/review-ratio`, public.
+- The extension names no organisation. Each developer types theirs in the options page.
 
 ## Open items
 
-- **Rollout.** Installing the GitHub App on `DiliTrust` (`docs/github-app-setup.md`) and the
-  repo transfer.
+- **Rollout.** Each organisation that uses the GitHub App installs it once
+  (`docs/github-app-setup.md`).
 - **Browsers.** Firefox (small manifest changes) and Safari (Xcode wrapper).

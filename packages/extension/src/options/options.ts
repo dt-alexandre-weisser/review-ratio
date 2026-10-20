@@ -17,13 +17,7 @@ import {
 import { FLOW_KEY, type AuthStatus } from '../lib/auth/sign-in.ts';
 import { clearPlacement, readPlacement } from '../lib/placement.ts';
 import type { Request, Response } from '../lib/messages.ts';
-import {
-  DEFAULT_SETTINGS,
-  isValidOrg,
-  parseExcludeList,
-  type AuthMode,
-  type Settings,
-} from '../lib/settings.ts';
+import { isValidOrg, parseExcludeList, type AuthMode, type Settings } from '../lib/settings.ts';
 import { Store, chromeStorageArea, type BadgeCache } from '../lib/storage.ts';
 import { localClock, localTime } from '../lib/time.ts';
 
@@ -100,14 +94,15 @@ function readForm(): Settings {
   return {
     authMode,
     token: authMode === 'pat' ? tokenInput.value.trim() : '',
-    org: orgInput.value.trim() || DEFAULT_SETTINGS.org,
+    org: orgInput.value.trim(),
     excludedRepos: parseExcludeList(excludedInput.value),
   };
 }
 
 function showOrg(org: string): void {
-  el('org-hint', HTMLElement).textContent = org;
-  el('org-hint-app', HTMLElement).textContent = org;
+  const name = org || 'your organisation';
+  el('org-hint', HTMLElement).textContent = name;
+  el('org-hint-app', HTMLElement).textContent = name;
 }
 
 function fillForm(settings: Settings): void {
@@ -338,20 +333,21 @@ function scheduleActivity(): void {
 
 /** Why the form cannot be used, or `null`. Save and Refresh both refuse invalid settings. */
 function formProblem(settings: Settings): string | null {
+  if (!settings.org) return 'Type the GitHub organisation whose pull requests count.';
   return isValidOrg(settings.org) ? null : `"${settings.org}" is not a GitHub organisation name.`;
 }
 
 /**
  * Saves valid settings, refreshes the badge with them, and reports the result. Saving token mode
  * forgets the app sign-in. App mode takes over when the sign-in ends, not on Save: until then the
- * stored token stays in use.
+ * stored token stays in use. Returns whether it saved.
  */
-async function saveAndRefresh(prefix: string): Promise<void> {
+async function saveAndRefresh(prefix: string): Promise<boolean> {
   let settings = readForm();
   const problem = formProblem(settings);
   if (problem) {
     setStatus('error', `Not saved. ${problem}`);
-    return;
+    return false;
   }
   if (settings.authMode === 'app' && !authStatus?.signedIn) {
     const stored = await store.getSettings();
@@ -364,6 +360,18 @@ async function saveAndRefresh(prefix: string): Promise<void> {
   await store.setSettings(settings);
   fillForm(await store.getSettings());
   await refreshBadge(prefix);
+  return true;
+}
+
+/**
+ * After Save, checks that the organisation lets review-ratio read it. A refusal would otherwise
+ * show as a badge with no activity.
+ */
+async function warnIfOrgRefuses(): Promise<void> {
+  const response = await send({ type: 'connection:test', settings: await store.getSettings() });
+  if (response.type === 'diagnosis' && !response.ok) {
+    setStatus('warn', `${status.textContent}\n\n${response.lines.join('\n')}`);
+  }
 }
 
 /** Refreshes the badge now and reports the result. */
@@ -393,7 +401,9 @@ function authStep(button: HTMLButtonElement, request: Request): void {
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
-  void busy(buttons.save, () => saveAndRefresh('Saved. '));
+  void busy(buttons.save, async () => {
+    if (await saveAndRefresh('Saved. ')) await warnIfOrgRefuses();
+  });
 });
 
 buttons.test.addEventListener('click', () => {
@@ -404,7 +414,9 @@ buttons.test.addEventListener('click', () => {
 });
 
 buttons.refresh.addEventListener('click', () => {
-  void busy(buttons.refresh, () => saveAndRefresh(''));
+  void busy(buttons.refresh, async () => {
+    await saveAndRefresh('');
+  });
 });
 
 buttons.forget.addEventListener('click', () => {
@@ -516,7 +528,7 @@ buttons.toggleToken.addEventListener('click', () => {
 });
 
 orgInput.addEventListener('input', () => {
-  showOrg(orgInput.value.trim() || DEFAULT_SETTINGS.org);
+  showOrg(orgInput.value.trim());
 });
 
 void (async () => {

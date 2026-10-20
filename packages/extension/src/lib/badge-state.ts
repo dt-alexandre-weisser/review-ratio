@@ -50,6 +50,17 @@ export function badgeView(cache: BadgeCache, nowMs: number): BadgeView {
       tooltip: 'review-ratio is not connected to GitHub. Open the extension options to sign in.',
     };
   }
+  if (cache.status === 'no_org') {
+    return {
+      text: 'review-ratio: set up',
+      short: 'set up',
+      parts: null,
+      tone: 'neutral',
+      stale: true,
+      tooltip:
+        'review-ratio does not know which organisation to count. Pick one in the extension options.',
+    };
+  }
   if (cache.status === 'bad_token') {
     return {
       text: 'review-ratio: token rejected',

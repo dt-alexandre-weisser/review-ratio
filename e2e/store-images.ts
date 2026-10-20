@@ -13,7 +13,7 @@ import { resolve } from 'node:path';
 
 import type { BrowserContext } from '@playwright/test';
 
-import { ME, installFakeGitHub, installFakeGitHubLogin } from './fake-github.ts';
+import { ME, ORG, installFakeGitHub, installFakeGitHubLogin } from './fake-github.ts';
 // The icon shader of the build, to draw the store icon with its transparent margin.
 import { iconShader, png } from '../packages/extension/scripts/icons.mjs';
 
@@ -91,6 +91,7 @@ async function main() {
     await options.goto(`chrome-extension://${id}/options.html`);
     await options.getByRole('button', { name: 'Sign in with GitHub' }).click();
     await options.locator('#signed-in-login').filter({ hasText: ME }).waitFor({ timeout: 15_000 });
+    await options.getByLabel('GitHub organisation').fill(ORG);
     await options.getByRole('button', { name: 'Save' }).click();
     await options.locator('#status').filter({ hasText: 'Saved' }).waitFor();
     await options
@@ -101,7 +102,7 @@ async function main() {
     // The header at 1,440 px: wide enough for the full badge.
     const github = await context.newPage();
     await github.setViewportSize({ width: 1440, height: 400 });
-    await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+    await github.goto('https://github.com/AcmeCorp/top-secret-repo/pulls');
     const badge = github.locator('#review-ratio-badge');
     await badge.locator('.review-ratio-full').filter({ hasText: 'Ratio 1.00' }).waitFor();
     // The fake header is bare markup: a few rules make it read as a header, not as test fixtures.

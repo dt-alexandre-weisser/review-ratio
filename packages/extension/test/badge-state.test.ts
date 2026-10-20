@@ -113,6 +113,14 @@ describe('badgeView', () => {
     expect(badgeView(cache({ status: 'bad_token' }), NOW).text).toContain('token rejected');
   });
 
+  it('asks for set up without an organisation', () => {
+    expect(badgeView(cache({ status: 'no_org' }), NOW)).toMatchObject({
+      text: 'review-ratio: set up',
+      tooltip:
+        'review-ratio does not know which organisation to count. Pick one in the extension options.',
+    });
+  });
+
   it('shows the no-activity state on a fresh ok cache without a score', () => {
     const view = badgeView(cache({ status: 'ok', score: null }), NOW);
     expect(view.tooltip).toContain('no activity');

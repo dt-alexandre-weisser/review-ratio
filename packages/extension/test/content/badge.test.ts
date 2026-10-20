@@ -52,7 +52,7 @@ const GLOBAL_NAV = `
     <div class="prc-Stack-Stack" data-component="Stack" style="display:flex">
       <div data-testid="top-nav-left" style="display:flex"><button aria-label="Open menu">=</button></div>
       <div data-testid="top-nav-center" id="center" style="display:flex">
-        <nav aria-label="Breadcrumbs"><a href="/DiliTrust">DiliTrust</a></nav>
+        <nav aria-label="Breadcrumbs"><a href="/AcmeCorp">AcmeCorp</a></nav>
         <div class="Search-module__searchButtonGroup__aetw5" data-component="ButtonGroup" id="group" style="display:flex">
           <div class="prc-ButtonGroup-Item"><button class="Search-module__searchButton__aiE0a" aria-label="Open quick search dialog, type / to search">Type / to search</button></div>
           <div class="prc-ButtonGroup-Item"></div>
@@ -307,7 +307,7 @@ describe('describeHeader', () => {
   it('gives the search path and the structure, with tags, ids and classes only', () => {
     document.body.innerHTML = APP_HEADER.replace(
       '<a href="/">logo</a>',
-      '<a href="/DiliTrust/secret" id="ctx" class="a b c d e">DiliTrust secret<svg><path></path></svg></a>',
+      '<a href="/AcmeCorp/secret" id="ctx" class="a b c d e">AcmeCorp secret<svg><path></path></svg></a>',
     );
     const text = describeHeader(document);
     expect(text.split('\n').slice(0, 7)).toEqual([
@@ -321,7 +321,7 @@ describe('describeHeader', () => {
     ]);
     expect(text).toContain('        a#ctx.a.b.c.d\n          svg\n');
     expect(text).not.toMatch(/^\s+path$/m);
-    expect(text).not.toContain('DiliTrust');
+    expect(text).not.toContain('AcmeCorp');
   });
 
   it('says when there is no search control, and is empty without a header', () => {

@@ -66,7 +66,7 @@ function send(
   });
 }
 
-const fromGitHub = { id: ID, url: 'https://github.com/DiliTrust/app' };
+const fromGitHub = { id: ID, url: 'https://github.com/AcmeCorp/app' };
 const fromOptions = { id: ID, url: `chrome-extension://${ID}/options.html` };
 
 describe('background worker', () => {
@@ -180,7 +180,7 @@ describe('background worker', () => {
   });
 
   it('tests the connection with the form settings, in the worker', async () => {
-    const settings = { authMode: 'pat', token: 'github_pat_form', org: 'DiliTrust' };
+    const settings = { authMode: 'pat', token: 'github_pat_form', org: 'AcmeCorp' };
     expect(await send({ type: 'connection:test', settings }, fromGitHub)).toEqual({
       type: 'error',
       message: 'not allowed',
@@ -205,7 +205,7 @@ describe('background worker', () => {
 
   it('uses the app token, renewed first when due, to test the connection', async () => {
     await chromeMock.storage.local.set({
-      settings: { authMode: 'app', token: '', org: 'DiliTrust' },
+      settings: { authMode: 'app', token: '', org: 'AcmeCorp' },
       appAuth: {
         accessToken: 'ghu_live',
         accessTokenExpiresAt: Date.now() + 3_600_000,
@@ -215,7 +215,7 @@ describe('background worker', () => {
       },
     });
     const app = await send(
-      { type: 'connection:test', settings: { authMode: 'app', org: 'DiliTrust' } },
+      { type: 'connection:test', settings: { authMode: 'app', org: 'AcmeCorp' } },
       fromOptions,
     );
     expect(app).toEqual({
@@ -238,7 +238,7 @@ describe('background worker', () => {
 
   it('tests the connection with the stored app token when GitHub cannot renew it', async () => {
     await chromeMock.storage.local.set({
-      settings: { authMode: 'app', token: '', org: 'DiliTrust' },
+      settings: { authMode: 'app', token: '', org: 'AcmeCorp' },
       appAuth: {
         accessToken: 'ghu_due',
         accessTokenExpiresAt: Date.now() - 1,
@@ -248,7 +248,7 @@ describe('background worker', () => {
       },
     });
     const app = await send(
-      { type: 'connection:test', settings: { authMode: 'app', org: 'DiliTrust' } },
+      { type: 'connection:test', settings: { authMode: 'app', org: 'AcmeCorp' } },
       fromOptions,
     );
     expect(app).toMatchObject({ ok: false, lines: ['GitHub: unreachable (Failed to fetch).'] });
@@ -275,7 +275,7 @@ describe('background worker refresh queue', () => {
     const area = chromeMock.storage.local;
     await area.set({ badge: {}, settings: { token: '' } });
     const background = send({ type: 'badge:get' }, fromGitHub);
-    await area.set({ settings: { token: 'tok' } });
+    await area.set({ settings: { token: 'tok', org: 'AcmeCorp' } });
     const forced = await send({ type: 'badge:refresh' }, fromOptions);
     await background;
     // With a token, the refresh got past the token check and failed on the unreachable GitHub API.
@@ -287,7 +287,7 @@ describe('background worker refresh queue', () => {
   it('logs each refresh and each call it made, with the token kept out', async () => {
     await chromeMock.storage.local.set({
       badge: {},
-      settings: { token: 'github_pat_secret' },
+      settings: { token: 'github_pat_secret', org: 'AcmeCorp' },
     });
     await send({ type: 'badge:refresh' }, fromOptions);
     // The worker writes the log when the refresh ends.

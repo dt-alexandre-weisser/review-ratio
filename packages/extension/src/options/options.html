@@ -44,9 +44,9 @@
               Signs in through the review-ratio GitHub App: <em>read-only</em> access to pull
               requests and code, with a token that expires after 8 hours and renews itself. It stays
               in this browser and is only sent to GitHub. An owner of
-              <strong id="org-hint-app">DiliTrust</strong> must have
+              <strong id="org-hint-app">your organisation</strong> must have
               <a id="install-link" href="#" target="_blank" rel="noreferrer">installed the app</a>
-              on the organisation.
+              on it.
             </p>
             <div id="app-signed-out">
               <button type="button" id="sign-in" class="primary">Sign in with GitHub</button>
@@ -84,7 +84,7 @@
                 rel="noreferrer"
                 >fine-grained personal access token</a
               >
-              with resource owner <strong id="org-hint">DiliTrust</strong>, access to all
+              with resource owner <strong id="org-hint">your organisation</strong>, access to all
               repositories, and these <em>read-only</em> permissions: Pull requests, Contents,
               Metadata. The token stays in this browser and is only sent to api.github.com.
             </p>
@@ -106,7 +106,21 @@
         <section>
           <h2>Scope</h2>
           <label for="org">GitHub organisation</label>
-          <input id="org" name="org" type="text" autocomplete="off" spellcheck="false" />
+          <input
+            id="org"
+            name="org"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="your-company"
+            aria-describedby="org-help"
+          />
+          <p id="org-help" class="hint">
+            The organisation whose pull requests count, as in github.com/<em>your-company</em>. Each
+            organisation decides what outside tools may read: some must install the app first, some
+            require single sign-on, some refuse tokens. Save checks that yours lets review-ratio in,
+            and says what to do when it does not.
+          </p>
           <label for="excluded">Excluded repositories</label>
           <textarea
             id="excluded"

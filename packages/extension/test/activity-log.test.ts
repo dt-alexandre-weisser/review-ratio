@@ -261,13 +261,13 @@ describe('loggingFetch', () => {
       now,
     );
     await fetchLogged(new Request('https://api.github.com/graphql#x', { method: 'POST' }));
-    await fetchLogged(new URL('https://github.com/DiliTrust/app/pull/12/files'));
+    await fetchLogged(new URL('https://github.com/AcmeCorp/app/pull/12/files'));
     await fetchLogged('https://api.github.com/x', { method: 'post', body: '{"up":[]}' });
     await log.flush();
     const calls = (await readActivity(area, now())).reverse() as CallEntry[];
     expect(calls.map((c) => [c.method, c.url, c.detail])).toEqual([
       ['POST', 'https://api.github.com/graphql', null],
-      ['GET', 'https://github.com/DiliTrust/app/pull/12/files', null],
+      ['GET', 'https://github.com/AcmeCorp/app/pull/12/files', null],
       ['POST', 'https://api.github.com/x', '9 B sent'],
     ]);
   });
@@ -296,7 +296,7 @@ describe('loggingFetch', () => {
     ]);
     expect(JSON.stringify(area.data)).not.toMatch(/ghr_secret|ghu_secret/);
     expect(isCredentialCall('https://github.com/login/device/code')).toBe(true);
-    expect(isCredentialCall('https://github.com/DiliTrust/app/pull/1')).toBe(false);
+    expect(isCredentialCall('https://github.com/AcmeCorp/app/pull/1')).toBe(false);
     expect(isCredentialCall('https://api.github.com/login/x')).toBe(false);
   });
 
@@ -326,17 +326,17 @@ describe('describeBody', () => {
     JSON.stringify({ query, variables });
 
   it('names the GraphQL operation and the PR it reads', () => {
-    expect(describeBody(graphql({ owner: 'DiliTrust', name: 'app', number: 12 }))).toBe(
-      'PullRequest DiliTrust/app#12',
+    expect(describeBody(graphql({ owner: 'AcmeCorp', name: 'app', number: 12 }))).toBe(
+      'PullRequest AcmeCorp/app#12',
     );
     expect(
       describeBody(
         graphql(
-          { owner: 'DiliTrust', name: 'app', number: 12, after: 'Y3Vy' },
+          { owner: 'AcmeCorp', name: 'app', number: 12, after: 'Y3Vy' },
           'query PullRequestFiles { x }',
         ),
       ),
-    ).toBe('PullRequestFiles DiliTrust/app#12, next page');
+    ).toBe('PullRequestFiles AcmeCorp/app#12, next page');
     expect(describeBody(graphql(null, '{ viewer { login } }'))).toBe('GraphQL');
     expect(describeBody(graphql({ owner: 'o', name: 'n', number: '12' }))).toBe('PullRequest');
   });
@@ -361,9 +361,9 @@ describe('cleanUrl and displayUrl', () => {
   it('shows host, path and a decoded query', () => {
     expect(
       displayUrl(
-        'https://api.github.com/search/issues?q=is%3Apr+org%3ADiliTrust+updated%3A%3E%3D2026-10-08&page=1',
+        'https://api.github.com/search/issues?q=is%3Apr+org%3AAcmeCorp+updated%3A%3E%3D2026-10-08&page=1',
       ),
-    ).toBe('api.github.com/search/issues?q=is:pr org:DiliTrust updated:>=2026-10-08&page=1');
+    ).toBe('api.github.com/search/issues?q=is:pr org:AcmeCorp updated:>=2026-10-08&page=1');
     expect(displayUrl('https://x.test/a?q=%E0%A4%A')).toBe('x.test/a?q=%E0%A4%A');
     expect(displayUrl('not a url')).toBe('not a url');
   });
@@ -377,7 +377,7 @@ describe('rows, summary and text', () => {
       ...call({
         at: NOW + 2000,
         method: 'POST',
-        url: 'https://github.com/DiliTrust/app/pull/12/files',
+        url: 'https://github.com/AcmeCorp/app/pull/12/files',
         detail: '1.2 kB sent',
         ms: 1500,
       }),
@@ -409,7 +409,7 @@ describe('rows, summary and text', () => {
     });
     expect(rowOf(entries[0]!).time).toMatch(/^\d\d:\d\d:\d\d$/);
     expect(rowOf(entries[1]!)).toMatchObject({
-      what: 'POST github.com/DiliTrust/app/pull/12/files',
+      what: 'POST github.com/AcmeCorp/app/pull/12/files',
       detail: '1.2 kB sent',
       result: '200',
       duration: '1.5 s',
@@ -443,7 +443,7 @@ describe('rows, summary and text', () => {
       /^\d\d:\d\d:\d\d {2}GET api\.github\.com\/x {2}→ failed in 25\.0 s {2}\(signal timed out\)$/,
     );
     expect(lines[1]).toMatch(
-      /POST github\.com\/DiliTrust\/app\/pull\/12\/files {2}→ 200 in 1\.5 s {2}\(1\.2 kB sent\)$/,
+      /POST github\.com\/AcmeCorp\/app\/pull\/12\/files {2}→ 200 in 1\.5 s {2}\(1\.2 kB sent\)$/,
     );
     expect(lines[2]).toMatch(/ {2}— refreshed: 1 review, 1 own PR$/);
     expect(toText([])).toBe('');
@@ -460,7 +460,7 @@ describe('request bodies', () => {
     for (const number of [1, 2, 3]) {
       await fetchLogged('https://api.github.com/graphql', {
         method: 'POST',
-        body: graphql({ owner: 'DiliTrust', name: 'app', number, me: 'dev' }),
+        body: graphql({ owner: 'AcmeCorp', name: 'app', number, me: 'dev' }),
       });
     }
     await log.flush();
@@ -472,11 +472,11 @@ describe('request bodies', () => {
     expect(latest?.body).toEqual({
       kind: 'graphql',
       queryId: id,
-      variables: '{"owner":"DiliTrust","name":"app","number":3,"me":"dev"}',
+      variables: '{"owner":"AcmeCorp","name":"app","number":3,"me":"dev"}',
     });
     expect(await readQuery(area, id)).toBe(QUERY);
     expect(formatBody(latest!.body!, QUERY)).toBe(
-      `${QUERY}\n\nvariables:\n{\n  "owner": "DiliTrust",\n  "name": "app",\n  "number": 3,\n  "me": "dev"\n}`,
+      `${QUERY}\n\nvariables:\n{\n  "owner": "AcmeCorp",\n  "name": "app",\n  "number": 3,\n  "me": "dev"\n}`,
     );
 
     // Written again with the next batch after the log was cleared ("Forget").

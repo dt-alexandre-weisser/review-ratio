@@ -4,7 +4,7 @@ import { diagnose } from '../src/lib/diagnose.ts';
 import { DEFAULT_SETTINGS } from '../src/lib/settings.ts';
 import { fakeFetch, json } from './helpers/fetch.ts';
 
-const settings = { ...DEFAULT_SETTINGS, token: 'tok' };
+const settings = { ...DEFAULT_SETTINGS, token: 'tok', org: 'AcmeCorp' };
 const NOW = Date.parse('2026-10-15T12:00:00Z');
 
 function github(
@@ -25,11 +25,11 @@ function github(
         )
       );
     }
-    if (url.pathname === '/orgs/DiliTrust/repos') return overrides.repos ?? json([{ id: 1 }]);
+    if (url.pathname === '/orgs/AcmeCorp/repos') return overrides.repos ?? json([{ id: 1 }]);
     if (url.pathname === '/search/issues') return overrides.search ?? json({ total_count: 42 });
     if (url.pathname === '/user/installations') {
       return (
-        overrides.installations ?? json({ installations: [{ account: { login: 'dilitrust' } }] })
+        overrides.installations ?? json({ installations: [{ account: { login: 'acmecorp' } }] })
       );
     }
     return json({}, { status: 404 });
@@ -42,20 +42,20 @@ describe('diagnose', () => {
     const result = await diagnose(settings, fetchImpl, NOW);
     expect(result.ok).toBe(true);
     expect(result.lines.join('\n')).toContain('token works for me, expires 2027-01-01');
-    expect(result.lines.join('\n')).toContain('42 pull requests of DiliTrust');
+    expect(result.lines.join('\n')).toContain('42 pull requests of AcmeCorp');
     expect(new Set(fetchImpl.calls.map((c) => new URL(c.url).host))).toEqual(
       new Set(['api.github.com']),
     );
     const search = fetchImpl.calls.find((c) => c.url.includes('/search/issues'))!;
     expect(new URL(search.url).searchParams.get('q')).toBe(
-      'is:pr org:DiliTrust updated:>=2026-10-08',
+      'is:pr org:AcmeCorp updated:>=2026-10-08',
     );
   });
 
   it('flags a token that cannot see the organisation private repositories', async () => {
     const result = await diagnose(settings, github({ repos: json([]) }), NOW);
     expect(result.ok).toBe(false);
-    expect(result.lines.join('\n')).toContain('sees no private repository of DiliTrust');
+    expect(result.lines.join('\n')).toContain('sees no private repository of AcmeCorp');
   });
 
   it('flags an unknown organisation, a missing permission and a rejected token', async () => {
@@ -68,6 +68,47 @@ describe('diagnose', () => {
     expect(
       (await diagnose(settings, github({ user: json({}, { status: 401 }) }), NOW)).lines.join(),
     ).toContain('token rejected (401)');
+  });
+
+  it('asks for an organisation before looking at one', async () => {
+    const fetchImpl = github();
+
+    const result = await diagnose({ ...settings, org: '' }, fetchImpl, NOW);
+
+    expect(result.ok).toBe(false);
+    expect(result.lines.at(-1)).toBe(
+      'GitHub: no organisation picked yet. Type the one whose pull requests count.',
+    );
+    expect(fetchImpl.calls.map((c) => new URL(c.url).pathname)).toEqual(['/user']);
+  });
+
+  it('says how to authorize the token when the organisation requires single sign-on', async () => {
+    const repos = json(
+      { message: 'Resource protected by organization SAML enforcement.' },
+      {
+        status: 403,
+        headers: { 'x-github-sso': 'required; url=https://github.com/orgs/AcmeCorp/sso?x=1' },
+      },
+    );
+
+    const result = await diagnose(settings, github({ repos }), NOW);
+
+    expect(result.ok).toBe(false);
+    expect(result.lines.at(-1)).toBe(
+      'GitHub: AcmeCorp requires SAML single sign-on. Authorize this token for AcmeCorp: https://github.com/orgs/AcmeCorp/sso?x=1',
+    );
+  });
+
+  it('flags an organisation that refuses fine-grained tokens', async () => {
+    const message = 'AcmeCorp forbids access via a fine-grained personal access tokens.';
+    const repos = json({ message }, { status: 403 });
+
+    const result = await diagnose(settings, github({ repos }), NOW);
+
+    expect(result.ok).toBe(false);
+    expect(result.lines.at(-1)).toBe(
+      `GitHub: AcmeCorp does not let fine-grained tokens in (${message}). Sign in with GitHub instead, or ask an owner of AcmeCorp to allow them.`,
+    );
   });
 
   it('flags a missing token', async () => {
@@ -88,7 +129,7 @@ describe('diagnose, signed in with the GitHub App', () => {
     expect(result.lines[0]).toMatch(
       /^GitHub: signed in as me with the GitHub App, current token valid until \d\d:\d\d and renewed by itself \(\? API calls left this hour\)\.$/,
     );
-    expect(result.lines.join('\n')).toContain('42 pull requests of DiliTrust');
+    expect(result.lines.join('\n')).toContain('42 pull requests of AcmeCorp');
     expect(fetchImpl.calls.map((c) => new URL(c.url).pathname)).toContain('/user/installations');
   });
 
@@ -106,7 +147,7 @@ describe('diagnose, signed in with the GitHub App', () => {
     const result = await diagnose(settings, fetchImpl, NOW, app);
     expect(result.ok).toBe(false);
     expect(result.lines.at(-1)).toBe(
-      `GitHub: the review-ratio app is not installed on DiliTrust. An owner of DiliTrust installs it here: ${INSTALL}`,
+      `GitHub: the review-ratio app is not installed on AcmeCorp. An owner of AcmeCorp installs it here: ${INSTALL}`,
     );
     expect(fetchImpl.calls.some((c) => c.url.includes('/orgs/'))).toBe(false);
   });
@@ -115,7 +156,7 @@ describe('diagnose, signed in with the GitHub App', () => {
     const result = await diagnose(settings, github({ repos: json([]) }), NOW, app);
     expect(result.ok).toBe(false);
     expect(result.lines.at(-1)).toContain(
-      'the review-ratio app sees no private repository of DiliTrust',
+      'the review-ratio app sees no private repository of AcmeCorp',
     );
     expect(result.lines.at(-1)).toContain(INSTALL);
   });
