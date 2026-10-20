@@ -5,7 +5,7 @@ import { isTrustedFor } from '../src/background/senders.ts';
 const ID = 'bhmdipijifghpkibegnfchgcafodlgnb';
 const ORIGIN = `chrome-extension://${ID}/`;
 const options = { id: ID, url: `${ORIGIN}options.html` };
-const github = { id: ID, url: 'https://github.com/DiliTrust/app/pulls' };
+const github = { id: ID, url: 'https://github.com/AcmeCorp/app/pulls' };
 
 describe('isTrustedFor', () => {
   it('lets the options page do everything', () => {

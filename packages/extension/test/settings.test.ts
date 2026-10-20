@@ -10,20 +10,21 @@ import {
 
 describe('parseExcludeList', () => {
   it('reads one repo per line, skipping blanks and comments, lowercased and deduplicated', () => {
-    expect(
-      parseExcludeList('DiliTrust/Legacy\n\n# old\n  sandbox  \ndilitrust/legacy\r\n'),
-    ).toEqual(['dilitrust/legacy', 'sandbox']);
+    expect(parseExcludeList('AcmeCorp/Legacy\n\n# old\n  sandbox  \nacmecorp/legacy\r\n')).toEqual([
+      'acmecorp/legacy',
+      'sandbox',
+    ]);
   });
 });
 
 describe('isExcludedRepo', () => {
-  const settings = { org: 'DiliTrust', excludedRepos: ['dilitrust/legacy', 'sandbox'] };
+  const settings = { org: 'AcmeCorp', excludedRepos: ['acmecorp/legacy', 'sandbox'] };
 
   it('matches full names and bare names within the org, case-insensitively', () => {
-    expect(isExcludedRepo(settings, 'DiliTrust/Legacy')).toBe(true);
-    expect(isExcludedRepo(settings, 'DiliTrust/sandbox')).toBe(true);
+    expect(isExcludedRepo(settings, 'AcmeCorp/Legacy')).toBe(true);
+    expect(isExcludedRepo(settings, 'AcmeCorp/sandbox')).toBe(true);
     expect(isExcludedRepo(settings, 'Other/sandbox')).toBe(false);
-    expect(isExcludedRepo(settings, 'DiliTrust/app')).toBe(false);
+    expect(isExcludedRepo(settings, 'AcmeCorp/app')).toBe(false);
   });
 });
 
@@ -54,8 +55,13 @@ describe('coerceSettings', () => {
 });
 
 describe('isValidOrg', () => {
+  it('picks no organisation by default', () => {
+    expect(DEFAULT_SETTINGS.org).toBe('');
+    expect(coerceSettings({}).org).toBe('');
+  });
+
   it('accepts GitHub organisation names only', () => {
-    expect(isValidOrg('DiliTrust')).toBe(true);
+    expect(isValidOrg('AcmeCorp')).toBe(true);
     expect(isValidOrg('a-b-1')).toBe(true);
     expect(isValidOrg('')).toBe(false);
     expect(isValidOrg('-a')).toBe(false);

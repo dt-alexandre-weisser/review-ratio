@@ -2,7 +2,9 @@
  * The options page's connection test. Checks what a refresh needs, and says what is wrong in
  * words a developer can act on. A token that works but cannot see the organisation's private
  * repositories is the classic silent failure: the badge would read "no activity". With the
- * GitHub App, the same silence comes from an organisation that has not installed the app.
+ * GitHub App, the same silence comes from an organisation that has not installed the app. An
+ * organisation can also refuse review-ratio outright: SAML single sign-on, or a policy against
+ * fine-grained tokens. Each case gets its own line.
  *
  * It runs in the service worker, which owns the app tokens and renews them.
  */
@@ -73,6 +75,10 @@ export async function diagnose(
           );
         }
 
+        if (!settings.org) {
+          problem('GitHub: no organisation picked yet. Type the one whose pull requests count.');
+          return { ok, lines };
+        }
         const installed = app ? await appInstalledOn(gh, settings.org) : true;
         const org = encodeURIComponent(settings.org);
         const repos = installed ? await gh(`/orgs/${org}/repos?type=private&per_page=1`) : null;
@@ -80,6 +86,8 @@ export async function diagnose(
           problem(`GitHub: the review-ratio app is not installed on ${settings.org}.${install}`);
         } else if (repos.status === 404) {
           problem(`GitHub: organisation ${settings.org} not found, or not visible to this token.`);
+        } else if (repos.status === 403) {
+          problem(await refusal(repos, settings.org, app !== null));
         } else if (!repos.ok) {
           problem(
             `GitHub: cannot list ${settings.org} repositories (${repos.status}). Check the token permissions.`,
@@ -109,6 +117,26 @@ export async function diagnose(
   }
 
   return { ok, lines };
+}
+
+/**
+ * Why the organisation refused to list its repositories. GitHub names SAML single sign-on in the
+ * `x-github-sso` header, with the URL that authorizes the token, and an organisation policy in the
+ * error message.
+ */
+async function refusal(res: Response, org: string, app: boolean): Promise<string> {
+  const sso = res.headers.get('x-github-sso');
+  if (sso) {
+    const url = /url=(\S+)/.exec(sso)?.[1];
+    const who = app ? 'sign-in' : 'token';
+    return `GitHub: ${org} requires SAML single sign-on. Authorize this ${who} for ${org}${url ? `: ${url}` : ' in your GitHub settings.'}`;
+  }
+  const body = (await res.json().catch(() => ({}))) as { message?: unknown };
+  const message = typeof body.message === 'string' ? body.message : '';
+  if (!app && /fine-grained/i.test(message)) {
+    return `GitHub: ${org} does not let fine-grained tokens in (${message}). Sign in with GitHub instead, or ask an owner of ${org} to allow them.`;
+  }
+  return `GitHub: cannot list ${org} repositories (403${message ? `: ${message}` : ''}). Check the token permissions, or ask an owner of ${org} whether its settings block review-ratio.`;
 }
 
 /**

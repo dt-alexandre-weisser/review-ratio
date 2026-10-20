@@ -38,16 +38,31 @@ On the options page, keep **Sign in with GitHub** selected:
 1. Click **Sign in with GitHub**. A code appears.
 2. Click **Open GitHub**, type the code, then click **Authorize review-ratio**.
 3. Back on the options page: **Signed in as _you_**.
-4. Check that **GitHub organisation** is `DiliTrust`, click **Save**, then **Test connection**.
+4. Type your **GitHub organisation**, as in github.com/_your-company_, then click **Save**.
 
-If Test connection says the app is not installed on the organisation, an owner of `DiliTrust`
-has to install it once: <https://github.com/apps/review-ratio/installations/new>. Until then,
-use a token instead (below).
+Save checks that the organisation lets review-ratio read it, and says what to do when it does not.
+See [When your organisation says no](#when-your-organisation-says-no).
 
 ### 4. See your ratio
 
 Open any github.com page. The badge appears in the header, left of the search box, within a few
 seconds.
+
+### When your organisation says no
+
+Each organisation decides what outside tools may read. **Save** and **Test connection** name the
+case and what to do:
+
+| What the options page says                    | What to do                                                                                                     |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| The app is not installed on _org_             | An owner of the organisation installs it once: <https://github.com/apps/review-ratio/installations/new>.       |
+| The app sees no private repository of _org_   | The installation is limited to some repositories. An owner switches it to all repositories.                    |
+| _org_ requires SAML single sign-on            | Open the link it gives and authorize the sign-in or the token for the organisation.                            |
+| _org_ does not let fine-grained tokens in     | Sign in with GitHub instead, or ask an owner to allow fine-grained tokens.                                     |
+| The token sees no private repository of _org_ | Check that the token's resource owner is the organisation. The organisation may also still have to approve it. |
+
+Until the organisation lets it in, the badge shows **Ratio —**, because it cannot see your
+activity there.
 
 ### Update
 
@@ -72,12 +87,12 @@ On the options page, pick **Paste a token**. Create a fine-grained personal acce
 
 | Field             | Value                                               |
 | ----------------- | --------------------------------------------------- |
-| Resource owner    | `DiliTrust`                                         |
+| Resource owner    | your organisation                                   |
 | Repository access | All repositories                                    |
 | Permissions       | Pull requests: Read, Contents: Read, Metadata: Read |
 
-Paste it, click **Save**, then **Test connection**. An owner of `DiliTrust` may have to approve the
-token first.
+Paste it, click **Save**, then **Test connection**. An owner of the organisation may have to
+approve the token first.
 
 </details>
 

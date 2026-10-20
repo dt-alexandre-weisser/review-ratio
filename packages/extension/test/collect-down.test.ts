@@ -59,7 +59,7 @@ describe('downRecordForPullRequest', () => {
 
   it('builds a record for my PR in review', () => {
     expect(downRecordForPullRequest(pr({ ...mine, readyForReviewAt: hoursAgo(5) }), ctx)).toEqual({
-      prKey: 'key:DiliTrust/app#1',
+      prKey: 'key:AcmeCorp/app#1',
       readyAtMs: NOW - 5 * 3_600_000,
       linesByClass: { production: 400 },
     });

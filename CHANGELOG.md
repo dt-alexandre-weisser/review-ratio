@@ -4,6 +4,11 @@
 
 First prototype.
 
+- No organisation built in. The options page asks for one, and the badge reads
+  `review-ratio: set up` until it has one. Save checks that the organisation lets review-ratio
+  read it, and names the case when it does not: app not installed, installation limited to some
+  repositories, SAML single sign-on, fine-grained tokens refused, token not approved.
+
 - Scoring in the extension: the formula (weights, decay, size tiers, rescue), the bundled class
   globs, rounding and record caps, with scored fixtures against a snapshot and the anchor
   invariant. Nothing leaves the browser except the GitHub API calls made with the user's token.

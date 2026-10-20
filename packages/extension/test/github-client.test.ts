@@ -210,7 +210,7 @@ describe('createGitHubClient', () => {
       const page = Number(url.searchParams.get('page'));
       const items = Array.from({ length: page === 1 ? 100 : 30 }, (_, i) => ({
         number: page * 1000 + i,
-        repository_url: 'https://api.github.com/repos/DiliTrust/app',
+        repository_url: 'https://api.github.com/repos/AcmeCorp/app',
         draft: false,
         updated_at: '2026-10-15T00:00:00Z',
         ...(i === 0 ? {} : { pull_request: {} }),
@@ -218,11 +218,11 @@ describe('createGitHubClient', () => {
       return json({ total_count: 130, items });
     });
     const client = createGitHubClient({ token: 't', fetchImpl });
-    const results = await client.searchPullRequests('is:pr org:DiliTrust');
+    const results = await client.searchPullRequests('is:pr org:AcmeCorp');
     expect(fetchImpl.calls).toHaveLength(2);
     expect(results).toHaveLength(128);
     const first = new URL(fetchImpl.calls[0]!.url);
-    expect(first.searchParams.get('q')).toBe('is:pr org:DiliTrust');
+    expect(first.searchParams.get('q')).toBe('is:pr org:AcmeCorp');
     expect(first.searchParams.get('per_page')).toBe('100');
   });
 
@@ -247,14 +247,14 @@ describe('createGitHubClient', () => {
   it('reads a pull request with one GraphQL query and maps it', async () => {
     const fetchImpl = fakeFetch(() => json({ data: { repository: { pullRequest: rawPr() } } }));
     const client = createGitHubClient({ token: 't', fetchImpl });
-    const details = await client.pullRequest('DiliTrust', 'app', 7, 'Me');
+    const details = await client.pullRequest('AcmeCorp', 'app', 7, 'Me');
     expect(fetchImpl.calls).toHaveLength(1);
     expect(fetchImpl.calls[0]!.url).toBe('https://api.github.com/graphql');
     const sent = JSON.parse(fetchImpl.calls[0]!.init.body as string);
-    expect(sent.variables).toEqual({ owner: 'DiliTrust', name: 'app', number: 7, me: 'Me' });
+    expect(sent.variables).toEqual({ owner: 'AcmeCorp', name: 'app', number: 7, me: 'Me' });
     expect(sent.query).toContain('myReviews: reviews(first: 50, author: $me)');
     expect(details).toMatchObject({
-      owner: 'DiliTrust',
+      owner: 'AcmeCorp',
       repo: 'app',
       number: 7,
       author: { login: 'alice', type: 'User' },
@@ -411,13 +411,13 @@ describe('createGitHubClient', () => {
       return json({ files: [{ filename: 'a.ts', changes: 4, patch: '…' }] });
     });
     const client = createGitHubClient({ token: 't', fetchImpl });
-    expect(await client.compare('DiliTrust', 'app', 'b', 'h')).toEqual([
+    expect(await client.compare('AcmeCorp', 'app', 'b', 'h')).toEqual([
       { filename: 'a.ts', changes: 4 },
     ]);
     const url = new URL(fetchImpl.calls[0]!.url);
-    expect(url.pathname).toBe('/repos/DiliTrust/app/compare/b...h');
+    expect(url.pathname).toBe('/repos/AcmeCorp/app/compare/b...h');
     expect(url.searchParams.get('per_page')).toBe('1');
-    expect(await client.compare('DiliTrust', 'app', 'gone', 'h')).toBeNull();
+    expect(await client.compare('AcmeCorp', 'app', 'gone', 'h')).toBeNull();
     const failing = createGitHubClient({
       token: 't',
       fetchImpl: fakeFetch(() => json({}, { status: 500 })),

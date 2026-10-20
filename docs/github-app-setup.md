@@ -16,9 +16,9 @@ Both values live in
 
 ## Install it on the organisation
 
-Done once, by an owner of `DiliTrust`:
+Done once per organisation, by one of its owners:
 
-1. Open <https://github.com/apps/review-ratio/installations/new> and pick **DiliTrust**.
+1. Open <https://github.com/apps/review-ratio/installations/new> and pick the organisation.
 2. Choose **All repositories**. With **Only select repositories**, the badge only counts reviews
    in those, and Test connection says so when none of a developer's repositories is included.
 3. Approve the permissions: read-only access to Contents, Pull requests and Metadata.

@@ -66,7 +66,7 @@ describe('Store', () => {
     const store = new Store(
       memoryStorage({
         badge: [1],
-        prKeys: { ok: KEY, bad: 'DiliTrust/app#1', worse: 3 },
+        prKeys: { ok: KEY, bad: 'AcmeCorp/app#1', worse: 3 },
         viewedSnapshots: {
           ok: { linesByClass: { test: 20 }, takenAt: 1 },
           badClass: { linesByClass: { ts: 20 }, takenAt: 1 },

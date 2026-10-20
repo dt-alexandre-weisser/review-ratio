@@ -65,6 +65,7 @@ export async function refresh(deps: RefreshDeps, reason?: string): Promise<Badge
   await store.migrate();
   const settings = await store.getSettings();
   if (!(await deps.auth.hasCredential())) return notConnected(deps);
+  if (!settings.org) return noOrg(deps);
 
   const startedAt = deps.now();
   deps.log?.(`refresh started${reason ? ` (${reason})` : ''}`);
@@ -129,6 +130,18 @@ async function notConnected(deps: RefreshDeps): Promise<BadgeCache> {
   }
   return deps.store.updateBadge({
     status: 'no_token',
+    error: null,
+    refreshStartedAt: null,
+    unfinishedRefreshes: 0,
+  });
+}
+
+async function noOrg(deps: RefreshDeps): Promise<BadgeCache> {
+  if ((await deps.store.getBadge()).status !== 'no_org') {
+    deps.log?.('refresh skipped: no GitHub organisation picked');
+  }
+  return deps.store.updateBadge({
+    status: 'no_org',
     error: null,
     refreshStartedAt: null,
     unfinishedRefreshes: 0,

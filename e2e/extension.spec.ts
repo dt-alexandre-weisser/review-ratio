@@ -2,7 +2,13 @@ import { resolve } from 'node:path';
 
 import { test as base, chromium, expect, type BrowserContext, type Page } from '@playwright/test';
 
-import { USER_CODE, installFakeGitHub, installFakeGitHubLogin } from './fake-github.ts';
+import {
+  ORG,
+  SSO_URL,
+  USER_CODE,
+  installFakeGitHub,
+  installFakeGitHubLogin,
+} from './fake-github.ts';
 
 const EXTENSION = resolve(import.meta.dirname, '../packages/extension/dist');
 
@@ -35,6 +41,7 @@ async function configure(page: Page, extensionId: string, settings: { token: str
   await page.goto(`chrome-extension://${extensionId}/options.html`);
   await page.getByLabel('Paste a token').check();
   await page.getByLabel('Token', { exact: true }).fill(settings.token);
+  await page.getByLabel('GitHub organisation').fill(ORG);
   await page.getByRole('button', { name: 'Save' }).click();
   await expect(page.locator('#status')).toContainText('Saved');
   // Saving refreshes the badge: wait for its end, so a GitHub page opened next shows the score.
@@ -61,7 +68,7 @@ test('shows the ratio scored in the browser in the GitHub header, calling GitHub
   await configure(options, extensionId, { token: 'github_pat_e2e' });
 
   const github = await context.newPage();
-  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await github.goto('https://github.com/AcmeCorp/top-secret-repo/pulls');
   const badge = github.locator('#review-ratio-badge');
   await expect(badge).toBeVisible();
   await expect(badge.locator('.review-ratio-full')).toHaveText('↑ 400 RP · ↓ 400 RP | Ratio 1.00');
@@ -98,7 +105,7 @@ test('shows the ratio scored in the browser in the GitHub header, calling GitHub
 
   // Clicking the badge does nothing.
   await badge.click();
-  await expect(github).toHaveURL('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await expect(github).toHaveURL('https://github.com/AcmeCorp/top-secret-repo/pulls');
 });
 
 test('keeps the badge visible but greyed when GitHub is unreachable', async ({
@@ -136,6 +143,11 @@ test('asks for set up without a token and flags a rejected token', async ({
   );
 
   const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  await options.getByRole('button', { name: 'Save' }).click();
+  await expect(options.locator('#status')).toHaveText(
+    'Not saved. Type the GitHub organisation whose pull requests count.',
+  );
   await configure(options, extensionId, { token: 'github_pat_revoked' });
   await options.getByRole('button', { name: 'Refresh badge now' }).click();
   await expect(options.locator('#status')).toContainText('token rejected');
@@ -152,9 +164,23 @@ test('reports the GitHub connection from the options page', async ({ context, ex
   const status = options.locator('#status');
   await expect(status).toContainText('token works for dev-e2e');
   await expect(status).toContainText(
-    'pull requests of DiliTrust updated in the last 7 days are visible',
+    'pull requests of AcmeCorp updated in the last 7 days are visible',
   );
   await expect(status).toHaveAttribute('data-kind', 'ok');
+});
+
+test('warns on save when the organisation requires single sign-on', async ({
+  context,
+  extensionId,
+}) => {
+  await installFakeGitHub(context, { requireSso: true });
+  const options = await context.newPage();
+  await configure(options, extensionId, { token: 'github_pat_e2e' });
+
+  const status = options.locator('#status');
+  await expect(status).toContainText(`${ORG} requires SAML single sign-on`);
+  await expect(status).toContainText(SSO_URL);
+  await expect(status).toHaveAttribute('data-kind', 'warn');
 });
 
 test('signs in with the GitHub App, shows the score, and signs out', async ({
@@ -196,11 +222,12 @@ test('signs in with the GitHub App, shows the score, and signs out', async ({
   ]);
   expect(posted.every((body) => (body['client_id'] ?? '').startsWith('Iv'))).toBe(true);
 
+  await options.getByLabel('GitHub organisation').fill(ORG);
   await options.getByRole('button', { name: 'Save' }).click();
   await expect(options.locator('#status')).toContainText('Saved');
   await expect(options.locator('#status')).not.toContainText('Refreshing the badge');
   const github = await context.newPage();
-  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await github.goto('https://github.com/AcmeCorp/top-secret-repo/pulls');
   await expect(github.locator('#review-ratio-badge .review-ratio-full')).toHaveText(
     '↑ 400 RP · ↓ 400 RP | Ratio 1.00',
   );
@@ -262,20 +289,24 @@ test('lists the calls of the last 30 minutes on the options page', async ({
 }) => {
   await installFakeGitHub(context);
   const options = await context.newPage();
-  // Saving refreshes the badge.
+  // Saving refreshes the badge and tests the connection.
   await configure(options, extensionId, { token: 'github_pat_e2e' });
 
   const rows = options.locator('#activity-rows');
   await expect(rows).toContainText('refresh started (asked by the options page)');
   await expect(rows).toContainText('GET api.github.com/search/issues?q=is:pr');
   await expect(rows).toContainText('POST api.github.com/graphql');
-  await expect(rows).toContainText(/PullRequest DiliTrust\/top-secret-repo#\d+/);
+  await expect(rows).toContainText(/PullRequest AcmeCorp\/top-secret-repo#\d+/);
   await expect(rows).toContainText(/refreshed: \d+ reviews?/);
   await expect(options.locator('#activity-summary')).toHaveText(
     /^\d+ calls in the last 30 minutes: \d+ to api\.github\.com\.$/,
   );
-  // Newest first: the refresh's last line is on top.
-  await expect(rows.locator('tr').first()).toContainText(/refreshed: /);
+  // Newest first: the refresh's last line is above its first. Save also tests the connection, so
+  // its calls interleave with the refresh's.
+  const lines = await rows.locator('tr').allInnerTexts();
+  expect(lines.findIndex((line) => line.includes('refreshed: '))).toBeLessThan(
+    lines.findIndex((line) => line.includes('refresh started')),
+  );
 
   await options.getByRole('button', { name: 'Test connection' }).click();
   await expect(options.locator('#status')).toContainText('token works for dev-e2e');
@@ -298,7 +329,7 @@ test('finds the search bar of a redesigned header, and stays visible in a narrow
 
   const github = await context.newPage();
   await github.setViewportSize({ width: 700, height: 600 });
-  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await github.goto('https://github.com/AcmeCorp/top-secret-repo/pulls');
   const badge = github.locator('#review-ratio-badge');
   await expect(badge).toBeVisible();
   await expect(badge).toHaveAttribute('data-placement', 'header');
@@ -324,7 +355,7 @@ test('floats the badge when the GitHub header has no place for it, and says so',
 
   const github = await context.newPage();
   await github.setViewportSize({ width: 1400, height: 800 });
-  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await github.goto('https://github.com/AcmeCorp/top-secret-repo/pulls');
   const badge = github.locator('#review-ratio-badge');
   await expect(badge).toBeVisible();
   await expect(badge).toHaveAttribute('data-placement', 'floating');
@@ -361,7 +392,7 @@ test('places the badge left of the search bar of the 2023–2025 header', async 
   const options = await context.newPage();
   await configure(options, extensionId, { token: 'github_pat_e2e' });
   const github = await context.newPage();
-  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await github.goto('https://github.com/AcmeCorp/top-secret-repo/pulls');
   await expect(
     github.locator('.AppHeader-globalBar-end > #review-ratio-badge + .AppHeader-search'),
   ).toHaveCount(1);
@@ -405,7 +436,7 @@ test("holds the badge's place while GitHub's React takes over its header", async
   await configure(options, extensionId, { token: 'github_pat_e2e' });
   const github = await context.newPage();
   await github.setViewportSize({ width: 1400, height: 600 });
-  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await github.goto('https://github.com/AcmeCorp/top-secret-repo/pulls');
   const badge = github.locator('#review-ratio-badge');
   const standIn = () =>
     github.evaluate(() => {
@@ -439,7 +470,7 @@ for (const width of [1400, 960]) {
     await configure(options, extensionId, { token: 'github_pat_e2e' });
     const github = await context.newPage();
     await github.setViewportSize({ width, height: 600 });
-    await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+    await github.goto('https://github.com/AcmeCorp/top-secret-repo/pulls');
     await expect(github.locator('#review-ratio-badge')).toHaveAttribute('data-placement', 'header');
 
     const result = await github.evaluate(async () => {
@@ -482,7 +513,7 @@ test('keeps the badge on screen when GitHub replaces its header, without a singl
   const options = await context.newPage();
   await configure(options, extensionId, { token: 'github_pat_e2e' });
   const github = await context.newPage();
-  await github.goto('https://github.com/DiliTrust/top-secret-repo/pulls');
+  await github.goto('https://github.com/AcmeCorp/top-secret-repo/pulls');
   await expect(github.locator('#review-ratio-badge')).toHaveAttribute('data-placement', 'header');
 
   // As GitHub's navigation does: a fresh header replaces the old one, three times. Every frame
@@ -520,7 +551,7 @@ test('shows the payload of each call', async ({ context, extensionId }) => {
   await expect(payload).toBeVisible();
   await expect(options.locator('#payload-title')).toHaveText('POST api.github.com/graphql');
   await expect(options.locator('#payload-text')).toContainText('query PullRequest');
-  await expect(options.locator('#payload-text')).toContainText('"owner": "DiliTrust"');
+  await expect(options.locator('#payload-text')).toContainText('"owner": "AcmeCorp"');
   await expect(options.locator('#payload-text')).not.toContainText('github_pat_e2e');
 
   await expect(

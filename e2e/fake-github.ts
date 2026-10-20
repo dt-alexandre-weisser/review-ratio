@@ -6,7 +6,8 @@
 import type { BrowserContext, Route } from '@playwright/test';
 
 export const ME = 'dev-e2e';
-const ORG = 'DiliTrust';
+export const ORG = 'AcmeCorp';
+export const SSO_URL = `https://github.com/orgs/${ORG}/sso?authorization_request=e2e`;
 const hourAgo = () => new Date(Date.now() - 3_600_000).toISOString();
 
 interface FakeReview {
@@ -86,6 +87,8 @@ function json(route: Route, body: unknown, status = 200) {
 export interface FakeGitHubOptions {
   /** Answer 401 to every API call. */
   rejectToken?: boolean;
+  /** Refuse the organisation's repositories until the token is authorized for its SAML SSO. */
+  requireSso?: boolean;
   /**
    * The header of the pages: GitHub's React header of 2026 (default), the AppHeader of 2023–2025,
    * a redesign with unknown classes but a search button, or one with neither.
@@ -118,7 +121,7 @@ const HEADERS = {
     <div data-component="Stack" style="${ROW};justify-content:space-between;padding:12px">
       <div data-testid="top-nav-left" style="${ROW}"><button aria-label="Open menu">=</button><a aria-label="Dashboard" href="/">logo</a></div>
       <div data-testid="top-nav-center" style="${ROW};flex:1">
-        <nav aria-label="Breadcrumbs"><a href="/DiliTrust">DiliTrust</a> / <a href="/DiliTrust/top-secret-repo">top-secret-repo</a></nav>
+        <nav aria-label="Breadcrumbs"><a href="/AcmeCorp">AcmeCorp</a> / <a href="/AcmeCorp/top-secret-repo">top-secret-repo</a></nav>
         <div class="Search-module__searchButtonGroup__aetw5" data-component="ButtonGroup" style="display:flex">
           <div><button class="Search-module__searchButton__aiE0a" aria-label="Open quick search dialog, type / to search" style="border-radius:6px 0 0 6px">Type / to search</button></div>
           <div><button aria-label="Command palette" style="border-radius:0 6px 6px 0">&gt;</button></div>
@@ -130,7 +133,7 @@ const HEADERS = {
   </header>`,
   app: `<header class="AppHeader" role="banner">
     <div class="AppHeader-globalBar" style="${ROW};justify-content:space-between;padding:12px">
-      <div class="AppHeader-globalBar-start" style="${ROW}"><a href="/">logo</a><span class="AppHeader-context-full">DiliTrust / top-secret-repo</span></div>
+      <div class="AppHeader-globalBar-start" style="${ROW}"><a href="/">logo</a><span class="AppHeader-context-full">AcmeCorp / top-secret-repo</span></div>
       <div class="AppHeader-globalBar-end" style="${ROW}">
         <div class="AppHeader-search"><qbsearch-input><button class="header-search-button" aria-label="Search or jump to…">Type / to search</button></qbsearch-input></div>
         <div class="AppHeader-actions" style="${ROW}"><button>+</button><a href="/pulls">PRs</a></div>
@@ -212,6 +215,14 @@ export async function installFakeGitHub(context: BrowserContext, options: FakeGi
     if (url.pathname === '/user') return json(route, { login: ME });
     if (url.pathname === '/user/installations') {
       return json(route, { total_count: 1, installations: [{ id: 1, account: { login: ORG } }] });
+    }
+    if (url.pathname === `/orgs/${ORG}/repos` && options.requireSso) {
+      return route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        headers: { 'x-github-sso': `required; url=${SSO_URL}` },
+        body: JSON.stringify({ message: 'Resource protected by organization SAML enforcement.' }),
+      });
     }
     if (url.pathname === `/orgs/${ORG}/repos`) return json(route, [{ id: 1, private: true }]);
     if (url.pathname === '/search/issues') {

@@ -20,7 +20,7 @@ const randomUUID = () => `00000000-0000-4000-8000-${String((uuid += 1)).padStart
 function input(github: GitHubClient, overrides: Partial<CollectInput> = {}): CollectInput {
   return {
     github,
-    settings: { org: 'DiliTrust', excludedRepos: [] },
+    settings: { org: 'AcmeCorp', excludedRepos: [] },
     classify,
     nowMs: NOW,
     prKeys: {},
@@ -33,22 +33,22 @@ function input(github: GitHubClient, overrides: Partial<CollectInput> = {}): Col
 
 describe('helpers', () => {
   it('parses repository URLs', () => {
-    expect(parseRepositoryUrl('https://api.github.com/repos/DiliTrust/app')).toEqual({
-      owner: 'DiliTrust',
+    expect(parseRepositoryUrl('https://api.github.com/repos/AcmeCorp/app')).toEqual({
+      owner: 'AcmeCorp',
       repo: 'app',
     });
     expect(parseRepositoryUrl('https://api.github.com/orgs/x')).toBeNull();
   });
 
   it('keys PR refs case-insensitively', () => {
-    expect(prRefKey({ owner: 'DiliTrust', repo: 'App', number: 3 })).toBe('dilitrust/app#3');
+    expect(prRefKey({ owner: 'AcmeCorp', repo: 'App', number: 3 })).toBe('acmecorp/app#3');
   });
 
   it('searches the org over the last 7 days, for reviews, own PRs and assigned bot PRs', () => {
-    expect(searchQueries('DiliTrust', 'me', NOW)).toEqual([
-      'is:pr org:DiliTrust updated:>=2026-10-08 reviewed-by:me',
-      'is:pr org:DiliTrust updated:>=2026-10-08 author:me',
-      'is:pr org:DiliTrust updated:>=2026-10-08 author:app/github-actions assignee:me',
+    expect(searchQueries('AcmeCorp', 'me', NOW)).toEqual([
+      'is:pr org:AcmeCorp updated:>=2026-10-08 reviewed-by:me',
+      'is:pr org:AcmeCorp updated:>=2026-10-08 author:me',
+      'is:pr org:AcmeCorp updated:>=2026-10-08 author:app/github-actions assignee:me',
     ]);
   });
 
@@ -73,23 +73,23 @@ describe('collectWindow', () => {
   it('collects ↑ and ↓ across PRs, deduplicated, skipping excluded repos', async () => {
     const github = fakeGitHub({ prs: [reviewed, own, excluded] });
     const result = await collectWindow(
-      input(github, { settings: { org: 'DiliTrust', excludedRepos: ['legacy'] } }),
+      input(github, { settings: { org: 'AcmeCorp', excludedRepos: ['legacy'] } }),
     );
     expect(github.queries).toHaveLength(3);
     expect(result.up.map((r) => r.reviewId)).toEqual(['r1']);
     expect(result.down).toHaveLength(1);
-    expect(Object.keys(result.prKeys)).toEqual(['dilitrust/app#2']);
-    expect(result.prKeys['dilitrust/app#2']).toBe(result.down[0]!.prKey);
+    expect(Object.keys(result.prKeys)).toEqual(['acmecorp/app#2']);
+    expect(result.prKeys['acmecorp/app#2']).toBe(result.down[0]!.prKey);
     expect(result).toMatchObject({ skipped: 0, total: 2 });
   });
 
   it('keeps existing PR keys and drops keys of PRs that left the window', async () => {
     const result = await collectWindow(
       input(fakeGitHub({ prs: [own] }), {
-        prKeys: { 'dilitrust/app#2': 'kept-key', 'dilitrust/app#99': 'stale-key' },
+        prKeys: { 'acmecorp/app#2': 'kept-key', 'acmecorp/app#99': 'stale-key' },
       }),
     );
-    expect(result.prKeys).toEqual({ 'dilitrust/app#2': 'kept-key' });
+    expect(result.prKeys).toEqual({ 'acmecorp/app#2': 'kept-key' });
     expect(result.down[0]!.prKey).toBe('kept-key');
   });
 
@@ -125,8 +125,8 @@ describe('collectWindow', () => {
       ['c1', 'head'],
     ]);
     expect(Object.keys(first.compareCache).sort()).toEqual([
-      'dilitrust/app:c1...head',
-      'dilitrust/app:fork...c1',
+      'acmecorp/app:c1...head',
+      'acmecorp/app:fork...c1',
     ]);
     const second = await collectWindow(input(github, { compareCache: first.compareCache }));
     expect(github.compares).toHaveLength(2);

@@ -20,6 +20,7 @@ async function setup(
   await store.setSettings({
     ...DEFAULT_SETTINGS,
     token: options.token ?? 'tok',
+    org: 'AcmeCorp',
   });
   let clock = NOW;
   const github = options.github ?? fakeGitHub({ prs: [pr({ myReviews: [review({ id: 'r1' })] })] });
@@ -158,6 +159,16 @@ describe('refresh', () => {
     expect((await store.getBadge()).attemptedAt).toBe(NOW + 11 * 60_000);
   });
 
+  it('asks for an organisation before calling GitHub', async () => {
+    const { deps, store } = await setup();
+    await store.setSettings({ ...(await store.getSettings()), org: '' });
+
+    const cache = await refresh(deps);
+
+    expect(cache.status).toBe('no_org');
+    expect(deps.github).not.toHaveBeenCalled();
+  });
+
   it('flags a rejected token', async () => {
     const github = fakeGitHub({ prs: [] });
     github.viewer = () => Promise.reject(new GitHubAuthError(401));
@@ -239,12 +250,12 @@ describe('refresh', () => {
     const { deps, store } = await setup({ github });
     await refresh(deps);
     expect(await store.getPrKeys()).toEqual({
-      'dilitrust/app#2': '00000000-0000-4000-8000-000000000001',
+      'acmecorp/app#2': '00000000-0000-4000-8000-000000000001',
     });
     expect(Object.keys(await store.getViewedSnapshots())).toEqual(['r1']);
     expect(Object.keys(await store.getCompareCache()).sort()).toEqual([
-      'dilitrust/app:c0...head',
-      'dilitrust/app:fork...c0',
+      'acmecorp/app:c0...head',
+      'acmecorp/app:fork...c0',
     ]);
   });
 });

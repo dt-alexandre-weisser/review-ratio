@@ -24,6 +24,8 @@ export type BadgeStatus =
   | 'github_error'
   /** No token configured yet. */
   | 'no_token'
+  /** Connected, but no organisation picked yet. */
+  | 'no_org'
   /** GitHub rejected the token. */
   | 'bad_token';
 
@@ -112,6 +114,7 @@ const STATUSES: ReadonlySet<string> = new Set<BadgeStatus>([
   'stale',
   'github_error',
   'no_token',
+  'no_org',
   'bad_token',
 ]);
 

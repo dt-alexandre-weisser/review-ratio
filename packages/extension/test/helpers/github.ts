@@ -58,7 +58,7 @@ export function summary(overrides: Partial<ReviewSummary> = {}): ReviewSummary {
 export function pr(overrides: Partial<PullRequestDetails> = {}): PullRequestDetails {
   const myReviews = overrides.myReviews ?? [];
   return {
-    owner: 'DiliTrust',
+    owner: 'AcmeCorp',
     repo: 'app',
     number: 1,
     state: 'OPEN',
