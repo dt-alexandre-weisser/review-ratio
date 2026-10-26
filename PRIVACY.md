@@ -2,7 +2,7 @@
 
 review-ratio is a browser extension that shows you, in the github.com header, how much code review
 you gave compared to how much you asked for. This policy covers the extension, whether installed
-from a release zip or from the Chrome Web Store.
+from a release zip, from the Chrome Web Store, or as the Firefox add-on signed by Mozilla.
 
 ## What the extension handles
 

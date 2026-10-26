@@ -107,6 +107,12 @@ describe('stampManifest', () => {
     ).toEqual({ name: 'review-ratio', version: '0.1.0.5', version_name: 'five' });
     expect(manifest.key).toBe('MIIB');
   });
+
+  it('leaves version_name out for Firefox, which has none', () => {
+    expect(stampManifest(manifest, { version: '0.1.0.5', versionName: null, store: true })).toEqual(
+      { name: 'review-ratio', version: '0.1.0.5' },
+    );
+  });
 });
 
 describe('zip', () => {

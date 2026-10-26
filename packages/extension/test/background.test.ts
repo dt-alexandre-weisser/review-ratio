@@ -306,3 +306,25 @@ describe('background worker refresh queue', () => {
     expect(JSON.stringify(session.data)).not.toContain('github_pat_secret');
   });
 });
+
+describe('background worker in Firefox', () => {
+  it('starts without storage.local.setAccessLevel', async () => {
+    const { setAccessLevel: _setAccessLevel, ...local } = chromeMock.storage.local;
+    const messages: Listener[] = [];
+    vi.stubGlobal('chrome', {
+      ...chromeMock,
+      runtime: {
+        ...chromeMock.runtime,
+        onMessage: { addListener: (fn: Listener) => messages.push(fn) },
+      },
+      storage: { ...chromeMock.storage, local },
+    });
+    vi.resetModules();
+    try {
+      await import('../src/background/index.ts');
+    } finally {
+      vi.stubGlobal('chrome', chromeMock);
+    }
+    expect(messages).toHaveLength(1);
+  });
+});

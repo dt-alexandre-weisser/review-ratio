@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Packages the built extension (`dist/`, run `pnpm build` first) into two zips, manifest.json at
- * their root:
+ * Packages the built extension (`dist/` and `dist-firefox/`, run `pnpm build` first) into three
+ * zips, manifest.json at their root:
  *
  *   review-ratio.zip                     unzip, then Load unpacked; keeps the pinned extension id
  *   review-ratio-chrome-web-store.zip    for the Chrome Web Store, without the manifest `key`
+ *   review-ratio-firefox.zip             unsigned, for addons.mozilla.org to sign
  *
  *   node scripts/package.mjs --build 42 --commit "$GITHUB_SHA" [--tag v0.1.0] [--out-dir release]
  *
@@ -24,6 +25,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export const ZIP_NAME = 'review-ratio.zip';
 export const STORE_ZIP_NAME = 'review-ratio-chrome-web-store.zip';
+export const FIREFOX_ZIP_NAME = 'review-ratio-firefox.zip';
 
 /**
  * Chrome's rule for `version`: one to four dot-separated integers from 0 to 65535, without leading
@@ -61,13 +63,14 @@ export function releaseVersion({ base, build, commit, tag }) {
 
 /**
  * The manifest as zipped: the release version, and no `key` for the Store, which gives the item
- * its own id.
+ * its own id. Firefox has no `version_name`: it gets none.
  * @param {Record<string, unknown>} manifest
- * @param {{ version: string, versionName: string, store: boolean }} stamp
+ * @param {{ version: string, versionName: string | null, store: boolean }} stamp
  */
 export function stampManifest(manifest, { version, versionName, store }) {
   /** @type {Record<string, unknown>} */
-  const stamped = { ...manifest, version, version_name: versionName };
+  const stamped = { ...manifest, version };
+  if (versionName !== null) stamped['version_name'] = versionName;
   if (store) delete stamped['key'];
   return stamped;
 }
@@ -143,7 +146,7 @@ function listFiles(dir) {
 
 /**
  * Zips `dist` with the stamped manifest.
- * @param {{ dist: string, version: string, versionName: string, store: boolean }} options
+ * @param {{ dist: string, version: string, versionName: string | null, store: boolean }} options
  */
 export function packageExtension({ dist, version, versionName, store }) {
   const files = listFiles(dist);
@@ -177,14 +180,20 @@ function main() {
     commit: values.commit,
     tag: values.tag,
   });
-  const dist = join(root, 'dist');
   const outDir = resolve(values['out-dir']);
   mkdirSync(outDir, { recursive: true });
-  for (const [name, store] of /** @type {const} */ ([
-    [ZIP_NAME, false],
-    [STORE_ZIP_NAME, true],
+  for (const [name, dist, store, named] of /** @type {const} */ ([
+    [ZIP_NAME, join(root, 'dist'), false, true],
+    [STORE_ZIP_NAME, join(root, 'dist'), true, true],
+    [FIREFOX_ZIP_NAME, join(root, 'dist-firefox'), true, false],
   ])) {
-    writeFileSync(join(outDir, name), packageExtension({ dist, version, versionName, store }));
+    const zipped = packageExtension({
+      dist,
+      version,
+      versionName: named ? versionName : null,
+      store,
+    });
+    writeFileSync(join(outDir, name), zipped);
     console.error(`packaged ${join(outDir, name)}`);
   }
   process.stdout.write(`${JSON.stringify({ version, versionName })}\n`);
