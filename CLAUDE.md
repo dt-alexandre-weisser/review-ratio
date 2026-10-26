@@ -71,3 +71,27 @@ visibility change by hand in the Developer Dashboard.
   from their own terminal, never through the chat.
 - Version refused: the Store wants a version higher than the last upload. Versions are
   `<package.json version>.<run number>`, so a fresh run fixes it.
+
+## Ongoing work
+
+Work started and not merged yet. An entry goes away with the PR that finishes it.
+
+### Firefox add-on
+
+A Firefox build of the extension, signed on addons.mozilla.org (AMO) and released from the same
+`v*` tag as the Chrome Web Store.
+
+| What         | Value                                                                                   |
+| ------------ | --------------------------------------------------------------------------------------- |
+| Branch       | `feat/firefox-add-on`, worktree `.claude/worktrees/feat-firefox`                        |
+| Pull request | draft, opening                                                                          |
+| AMO channel  | unlisted: AMO signs the XPI, the GitHub Release hosts it, `update_url` updates installs |
+| Add-on ID    | `@review-ratio`, the gecko id, permanent once signed                                    |
+| Repo secrets | `AMO_JWT_ISSUER`, `AMO_JWT_SECRET`: not set                                             |
+
+Open:
+
+- Whether Firefox's update check follows GitHub's release-download redirect. If it does not,
+  `updates.json` moves to another HTTPS host.
+- No end-to-end tests in Firefox: Playwright cannot load extensions there. `web-ext lint` checks
+  the Firefox build in CI.
