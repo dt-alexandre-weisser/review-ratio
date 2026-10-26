@@ -31,6 +31,10 @@ For both:
 - Stored in `chrome.storage.local`, restricted to trusted contexts: the background worker and the
   options page. Content scripts, and so a compromised github.com page, cannot read them. Chrome
   supports this restriction on `storage.local` from version 140, the extension's minimum.
+  Firefox does not support it
+  ([bug 1724754](https://bugzilla.mozilla.org/show_bug.cgi?id=1724754)): in the Firefox add-on,
+  the content script's context can read `storage.local`, and so a compromised github.com renderer
+  could reach the tokens. Web pages themselves still cannot.
 - The whole sign-in runs in the background worker, never in a content script. The device code
   stays in the worker's memory; the options page only sees the code to type and the state.
 - The access token is sent only to `api.github.com`. The device code and the refresh token are

@@ -8,6 +8,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/dist/**',
+      '**/dist-firefox/**',
       '**/coverage/**',
       '**/node_modules/**',
       '**/*.d.ts',

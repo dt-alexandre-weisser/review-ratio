@@ -3,7 +3,9 @@ name: Release
 # Builds the extension zip and publishes it as a GitHub Release, so nobody builds it to install it:
 #   https://github.com/dt-alexandre-weisser/review-ratio/releases/latest/download/review-ratio.zip
 # always serves the newest build. A v* tag (v0.1.0, matching package.json) also submits the build
-# to the Chrome Web Store once its secrets exist: docs/chrome-web-store.md.
+# to the Chrome Web Store once its secrets exist: docs/chrome-web-store.md. It also has
+# addons.mozilla.org sign the Firefox build, published on the fixed release `firefox` that Firefox
+# installs and updates from, once its secrets exist: docs/firefox-add-ons.md.
 #
 # The version is <packages/extension/package.json version>.<run number>, stamped in the zips only.
 # Every trigger of this one workflow shares the run number, so main builds and tag builds keep
@@ -21,6 +23,7 @@ on:
       - .nvmrc
       - .github/workflows/release.yml
       - .github/scripts/chrome-web-store.sh
+      - .github/scripts/firefox-add-ons.sh
     tags: ['v*']
   # From main, a release like a push. From another branch, a prerelease that never becomes Latest.
   workflow_dispatch:
@@ -44,6 +47,7 @@ jobs:
       version: ${{ steps.package.outputs.version }}
       version-name: ${{ steps.package.outputs.version-name }}
       store-configured: ${{ steps.store.outputs.configured }}
+      amo-configured: ${{ steps.amo.outputs.configured }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -54,6 +58,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Format, lint, typecheck, unit tests, build
         run: pnpm check
+      - name: Lint the Firefox build as addons.mozilla.org does
+        run: pnpm lint:firefox
       - name: Package the zips
         id: package
         run: |
@@ -82,6 +88,23 @@ jobs:
           done
           if (( ${#missing[@]} )); then
             echo "::notice title=Chrome Web Store skipped::Missing secrets ${missing[*]}. See docs/chrome-web-store.md."
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: addons.mozilla.org secrets
+        id: amo
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          missing=()
+          for name in AMO_JWT_ISSUER AMO_JWT_SECRET; do
+            [[ -n ${!name} ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} )); then
+            echo "::notice title=Firefox Add-ons skipped::Missing secrets ${missing[*]}. See docs/firefox-add-ons.md."
             echo 'configured=false' >> "$GITHUB_OUTPUT"
           else
             echo 'configured=true' >> "$GITHUB_OUTPUT"
@@ -128,6 +151,8 @@ jobs:
           3. On the options page that opens, click **Sign in with GitHub**.
 
           \`review-ratio-chrome-web-store.zip\` is for the Chrome Web Store only: it does not keep the extension's fixed id when loaded unpacked.
+
+          On Firefox, install the build Mozilla signed instead: open ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/firefox/review-ratio.xpi in Firefox, click **Add**, then **Sign in with GitHub** on the options page. It updates by itself. \`review-ratio-firefox.zip\` is the unsigned package sent to Mozilla: Firefox does not install it.
           EOF
 
           # The newest version is Latest, whatever order the runs finish in; a branch run never is.
@@ -188,3 +213,34 @@ jobs:
           CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: .github/scripts/chrome-web-store.sh release/review-ratio-chrome-web-store.zip "$VERSION"
+
+  firefox:
+    name: Firefox Add-ons
+    # The signed file goes on the tag's release, which github-release creates.
+    needs: [build, github-release]
+    if: startsWith(github.ref, 'refs/tags/v') && needs.build.outputs.amo-configured == 'true'
+    runs-on: ubuntu-24.04
+    # Signing waits for Mozilla's automatic review, usually a few minutes.
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: review-ratio-${{ needs.build.outputs.version }}
+          path: release
+      - name: Sign and publish
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: .github/scripts/firefox-add-ons.sh release/review-ratio-firefox.zip "$VERSION" "$GITHUB_REF_NAME"

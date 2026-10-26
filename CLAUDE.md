@@ -5,8 +5,8 @@ A Chrome MV3 extension: a private review-ratio badge in the github.com header. P
 
 ## Gates
 
-`pnpm check` runs format, lint, typecheck, unit tests and build. Run `pnpm test:e2e` too when the
-extension changed. `pnpm store:images` regenerates `store/*.png` when the options page or the badge
+`pnpm check` runs format, lint, typecheck, unit tests and build. Run `pnpm test:e2e` and
+`pnpm lint:firefox` too when the extension changed. `pnpm store:images` regenerates `store/*.png` when the options page or the badge
 changes how it looks.
 
 ## Organisation agnostic
@@ -72,26 +72,38 @@ visibility change by hand in the Developer Dashboard.
 - Version refused: the Store wants a version higher than the last upload. Versions are
   `<package.json version>.<run number>`, so a fresh run fixes it.
 
+## Firefox
+
+**The add-on does not exist on addons.mozilla.org yet.** The first `v*` tag pushed once both
+`AMO_*` secrets are set signs it, and that signing creates it. The procedure is in
+[docs/firefox-add-ons.md](docs/firefox-add-ons.md).
+
+| What            | Value                                                                  |
+| --------------- | ---------------------------------------------------------------------- |
+| Channel         | unlisted (self-distributed): Mozilla signs, GitHub Releases distribute |
+| Gecko id        | `@review-ratio` (`GECKO_ID` in `scripts/firefox.mjs`), never changes   |
+| Minimum Firefox | 143, for `storage.session.getKeys()`                                   |
+| Install link    | `releases/download/firefox/review-ratio.xpi`                           |
+| `update_url`    | `releases/download/firefox/updates.json`                               |
+| Repo secrets    | `AMO_JWT_ISSUER`, `AMO_JWT_SECRET`: not set yet                        |
+
+`pnpm build` writes `dist-firefox/` next to `dist/`; `scripts/firefox.mjs` derives its manifest
+from `manifest.json`. The same tag releases both browsers, with the same version. The Release job
+**Firefox Add-ons** signs `review-ratio-firefox.zip` with `web-ext sign --channel unlisted`,
+attaches `review-ratio-<version>.xpi` to the tag's release, then updates the fixed prerelease
+`firefox`. Do not delete that release or its tag: every install reads `updates.json` from it.
+
+**When the Firefox job fails:**
+
+- Missing secrets: the job is skipped with a notice. After the user sets them from their own
+  terminal (`gh secret set AMO_JWT_ISSUER`, never through the chat), start a fresh run for the
+  tag: `gh workflow run release.yml --ref v<version>`.
+- Version already exists: AMO already signed this version (a re-run). A fresh run fixes it.
+- Approval timeout: AMO held the version for more than 15 minutes; it is signed later, from the
+  Developer Hub link in the log.
+
 ## Ongoing work
 
 Work started and not merged yet. An entry goes away with the PR that finishes it.
 
-### Firefox add-on
-
-A Firefox build of the extension, signed on addons.mozilla.org (AMO) and released from the same
-`v*` tag as the Chrome Web Store.
-
-| What         | Value                                                                                   |
-| ------------ | --------------------------------------------------------------------------------------- |
-| Branch       | `feat/firefox-add-on`, worktree `.claude/worktrees/feat-firefox`                        |
-| Pull request | draft, opening                                                                          |
-| AMO channel  | unlisted: AMO signs the XPI, the GitHub Release hosts it, `update_url` updates installs |
-| Add-on ID    | `@review-ratio`, the gecko id, permanent once signed                                    |
-| Repo secrets | `AMO_JWT_ISSUER`, `AMO_JWT_SECRET`: not set                                             |
-
-Open:
-
-- Whether Firefox's update check follows GitHub's release-download redirect. If it does not,
-  `updates.json` moves to another HTTPS host.
-- No end-to-end tests in Firefox: Playwright cannot load extensions there. `web-ext lint` checks
-  the Firefox build in CI.
+None.

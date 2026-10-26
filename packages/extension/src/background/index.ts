@@ -32,10 +32,15 @@ const activity = new ActivityLog(session, {
 const loggedFetch = loggingFetch((input, init) => fetch(input, init), activity);
 
 // The GitHub tokens live in storage.local. Content scripts never need it: keep it out of reach
-// of a compromised github.com renderer.
-chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch((error: unknown) => {
-  console.warn('[review-ratio] cannot restrict storage access', error);
-});
+// of a compromised github.com renderer. Firefox has no setAccessLevel (bug 1724754), and calling
+// it would stop the worker before it listens to anything.
+if ('setAccessLevel' in chrome.storage.local) {
+  chrome.storage.local
+    .setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
+    .catch((error: unknown) => {
+      console.warn('[review-ratio] cannot restrict storage access', error);
+    });
+}
 
 function log(message: string): void {
   console.info(`[review-ratio] ${message}`);

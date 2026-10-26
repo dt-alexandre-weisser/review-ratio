@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Firefox 143 or later: the same extension as a Firefox add-on, signed by Mozilla on the unlisted
+  channel and installed from `releases/download/firefox/review-ratio.xpi`. It updates itself
+  from the `updates.json` next to it. A `v*` tag has addons.mozilla.org sign it once the
+  `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` secrets exist. Firefox cannot keep `storage.local` from
+  content scripts, so there the token is not hidden from them (SECURITY.md).
+
 ## 0.1.0 (2026-10-20)
 
 First prototype.

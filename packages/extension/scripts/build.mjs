@@ -1,23 +1,35 @@
 #!/usr/bin/env node
 /**
- * Builds the unpacked extension into `dist/`.
+ * Builds the unpacked extension into `dist/`, or the Firefox one into `dist-firefox/`.
  *
- *   node scripts/build.mjs           # one build
- *   node scripts/build.mjs --watch   # rebuild on change
+ *   node scripts/build.mjs                    # one build
+ *   node scripts/build.mjs --watch            # rebuild on change
+ *   node scripts/build.mjs --target firefox   # the Firefox build
  *
  * The background worker is an ES module; the content script, the options page and the scoring
- * page are IIFEs because Chrome runs them as classic scripts.
+ * page are IIFEs because Chrome runs them as classic scripts. The Firefox build is not minified, so
+ * the addons.mozilla.org reviewers read the code they sign (docs/firefox-add-ons.md).
  */
 import { context } from 'esbuild';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, watchFile, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 
+import { FIREFOX_MIN_VERSION, firefoxManifest } from './firefox.mjs';
 import { writeIcons } from './icons.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const dist = join(root, 'dist');
-const watch = process.argv.includes('--watch');
+const { values } = parseArgs({
+  options: {
+    watch: { type: 'boolean', default: false },
+    target: { type: 'string', default: 'chrome' },
+  },
+});
+const { watch, target } = values;
+if (target !== 'chrome' && target !== 'firefox') throw new Error(`unknown --target ${target}`);
+const firefox = target === 'firefox';
+const dist = join(root, firefox ? 'dist-firefox' : 'dist');
 
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
@@ -25,9 +37,9 @@ mkdirSync(dist, { recursive: true });
 /** @type {import('esbuild').BuildOptions} */
 const common = {
   bundle: true,
-  target: ['chrome140'],
+  target: [firefox ? `firefox${FIREFOX_MIN_VERSION.split('.')[0]}` : 'chrome140'],
   sourcemap: watch ? 'inline' : false,
-  minify: !watch,
+  minify: !watch && !firefox,
   legalComments: 'none',
   logLevel: 'info',
   define: { 'process.env.NODE_ENV': JSON.stringify(watch ? 'development' : 'production') },
@@ -57,8 +69,9 @@ const STATIC_FILES = [
 ];
 
 function copyStatic() {
-  const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
-  manifest.version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+  const shared = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
+  shared.version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
+  const manifest = firefox ? firefoxManifest(shared) : shared;
   writeFileSync(join(dist, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   copyFileSync(join(root, 'src/options/options.html'), join(dist, 'options.html'));
   copyFileSync(join(root, 'src/options/options.css'), join(dist, 'options.css'));
@@ -90,7 +103,7 @@ if (watch) {
       console.info(`copied ${file}`);
     });
   }
-  console.info('watching… load packages/extension/dist as an unpacked extension');
+  console.info(`watching… load ${dist} as an unpacked extension`);
 } else {
   await Promise.all(contexts.map((c) => c.rebuild()));
   await Promise.all(contexts.map((c) => c.dispose()));
